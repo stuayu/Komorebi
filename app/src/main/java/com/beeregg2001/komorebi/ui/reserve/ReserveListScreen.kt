@@ -40,7 +40,6 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "ReserveListScreen"
 
-// 🌟 録画予約タブ専用のチケットシステム
 enum class ReserveFocusTicket { NONE, TARGET_RESERVE_ID, TARGET_CONDITION_ID, CONTENT_TOP }
 
 @Stable
@@ -230,7 +229,6 @@ fun ReserveListScreen(
                 if (targetId != null) {
                     var isFound = false
                     when (selectedTabIndex) {
-                        // 🌟 修正: 条件IDの検索は「自動予約タブ（2）」のみで行うように変更
                         2 -> {
                             val index = conditions.indexOfFirst { it.id == targetId }
                             if (index != -1) {
@@ -295,11 +293,13 @@ fun ReserveListScreen(
                 false
             }
     ) {
-        Box(modifier = Modifier
-            .size(1.dp)
-            .alpha(0f)
-            .focusRequester(localSafeHouse)
-            .focusable())
+        Box(
+            modifier = Modifier
+                .size(1.dp)
+                .alpha(0f)
+                .focusRequester(localSafeHouse)
+                .focusable()
+        )
 
         Box(
             modifier = Modifier
@@ -343,6 +343,9 @@ fun ReserveListScreen(
                             .focusProperties {
                                 down = listFocusRequester
                                 up = topNavFocusRequester ?: FocusRequester.Default
+                                // 🌟 追加: タブの左右端でのフォーカス抜け落ち防止
+                                if (index == 0) left = FocusRequester.Cancel
+                                if (index == tabs.lastIndex) right = FocusRequester.Cancel
                             }
                             .onKeyEvent { event ->
                                 if (event.key == Key.DirectionUp && event.type == KeyEventType.KeyDown) {
@@ -384,9 +387,8 @@ fun ReserveListScreen(
                 label = "ReserveTabContent"
             ) { targetIndex ->
                 when (targetIndex) {
-                    // 🌟 修正: 「すべての予約」タブ
                     0 -> {
-                        if (reserves.isEmpty()) { // 条件(conditions)のチェックを削除
+                        if (reserves.isEmpty()) {
                             EmptyMessage(
                                 message = "現在、予約されている番組はありません。",
                                 listFocusRequester = listFocusRequester,
@@ -403,7 +405,6 @@ fun ReserveListScreen(
                                     .focusRestorer()
                                     .focusProperties { up = tabFocusRequesters[0] }
                             ) {
-                                // 予約番組（reserves）のみを表示する
                                 items(reserves, key = { "all_res_${it.id}" }) { program ->
                                     val specificRequester = remember { FocusRequester() }
                                     LaunchedEffect(
@@ -428,6 +429,10 @@ fun ReserveListScreen(
                                         },
                                         modifier = Modifier
                                             .focusRequester(specificRequester)
+                                            .focusProperties {
+                                                left = FocusRequester.Cancel
+                                                right = FocusRequester.Cancel
+                                            }
                                             .onFocusChanged {
                                                 if (it.isFocused || it.hasFocus) {
                                                     viewModel.lastClickedReserveId = program.id
@@ -436,12 +441,10 @@ fun ReserveListScreen(
                                             }
                                     )
                                 }
-                                // 🌟 修正: ここにあった `items(conditions)` ブロックを完全に削除しました。
                             }
                         }
                     }
 
-                    // 「通常予約」タブ
                     1 -> {
                         if (normalReserves.isEmpty()) {
                             EmptyMessage(
@@ -484,6 +487,10 @@ fun ReserveListScreen(
                                         },
                                         modifier = Modifier
                                             .focusRequester(specificRequester)
+                                            .focusProperties {
+                                                left = FocusRequester.Cancel
+                                                right = FocusRequester.Cancel
+                                            }
                                             .onFocusChanged {
                                                 if (it.isFocused || it.hasFocus) {
                                                     viewModel.lastClickedReserveId = program.id
@@ -496,7 +503,6 @@ fun ReserveListScreen(
                         }
                     }
 
-                    // 「キーワード自動予約」タブ
                     2 -> {
                         if (conditions.isEmpty()) {
                             EmptyMessage(
@@ -541,6 +547,10 @@ fun ReserveListScreen(
                                         reserves = reserves,
                                         modifier = Modifier
                                             .focusRequester(specificRequester)
+                                            .focusProperties {
+                                                left = FocusRequester.Cancel
+                                                right = FocusRequester.Cancel
+                                            }
                                             .onFocusChanged {
                                                 if (it.isFocused || it.hasFocus) {
                                                     viewModel.lastClickedConditionId = condition.id
@@ -571,7 +581,11 @@ private fun EmptyMessage(
             .fillMaxSize()
             .focusRequester(listFocusRequester)
             .focusRestorer()
-            .focusProperties { up = targetTabRequester }
+            .focusProperties {
+                up = targetTabRequester
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+            }
             .focusable(),
         contentAlignment = Alignment.Center
     ) {

@@ -1,28 +1,41 @@
-@file:OptIn(ExperimentalTvMaterial3Api::class)
+@file:OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class)
 
 package com.beeregg2001.komorebi.ui.home.components
 
 import android.os.Build
+import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.tv.foundation.lazy.list.TvLazyRow
-import androidx.tv.foundation.lazy.list.items
+import androidx.tv.foundation.lazy.list.itemsIndexed
+import androidx.tv.foundation.lazy.list.rememberTvLazyListState
 import androidx.tv.material3.*
 import com.beeregg2001.komorebi.common.UrlBuilder
+import com.beeregg2001.komorebi.common.safeRequestFocusWithRetry
 import com.beeregg2001.komorebi.data.model.*
+import com.beeregg2001.komorebi.ui.home.HomeFocusTicket
+import com.beeregg2001.komorebi.ui.home.HomeFocusTicketManager
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import com.beeregg2001.komorebi.ui.theme.getSeasonalIcon
+import com.beeregg2001.komorebi.viewmodel.HomeViewModel
+import kotlinx.coroutines.delay
 
 @Composable
 fun SectionHeader(title: String, icon: ImageVector, modifier: Modifier = Modifier) {
@@ -65,6 +78,8 @@ fun NavigationLinkButton(label: String, icon: ImageVector, onClick: () -> Unit) 
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun LastWatchedSection(
     channels: List<Channel>,
@@ -72,11 +87,24 @@ fun LastWatchedSection(
     konomiIp: String, konomiPort: String,
     mirakurunIp: String, mirakurunPort: String,
     modifier: Modifier = Modifier,
+    contentFirstItemRequester: FocusRequester? = null,
     onChannelClick: (Channel) -> Unit,
-    onUpdateHeroInfo: (HomeHeroInfo) -> Unit
+    onUpdateHeroInfo: (HomeHeroInfo) -> Unit,
+    ticketManager: HomeFocusTicketManager,
+    homeViewModel: HomeViewModel,
+    sectionId: String
 ) {
     val isKonomiTvMode =
         mirakurunIp.isEmpty() || mirakurunIp == "localhost" || mirakurunIp == "127.0.0.1"
+
+    val rowState = rememberTvLazyListState()
+
+    LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+        if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE && ticketManager.targetSection == sectionId) {
+            val index = channels.indexOfFirst { it.id == ticketManager.targetItemId }
+            if (index != -1) rowState.scrollToItem(index)
+        }
+    }
 
     Column(modifier = Modifier.animateContentSize()) {
         SectionHeader(
@@ -85,11 +113,12 @@ fun LastWatchedSection(
             Modifier.padding(horizontal = 48.dp)
         )
         TvLazyRow(
+            state = rowState,
             modifier = modifier,
             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(channels, key = { "ch_${it.id}" }) { channel ->
+            itemsIndexed(channels, key = { _, it -> "ch_${it.id}" }) { index, channel ->
                 val logoUrl = if (isKonomiTvMode) UrlBuilder.getKonomiTvLogoUrl(
                     konomiIp,
                     konomiPort,
@@ -101,8 +130,22 @@ fun LastWatchedSection(
                     channel.networkId,
                     channel.serviceId
                 )
+
                 val liveChannel = remember(groupedChannels, channel.id) {
                     groupedChannels.values.flatten().find { it.id == channel.id }
+                }
+
+                val specificRequester = remember { FocusRequester() }
+                LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+                    if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE &&
+                        ticketManager.targetSection == sectionId &&
+                        ticketManager.targetItemId == channel.id
+                    ) {
+                        delay(150)
+                        specificRequester.safeRequestFocusWithRetry("HomeRestore_LastWatched")
+                        ticketManager.consume(HomeFocusTicket.HOME_RESTORE)
+                        homeViewModel.clearFocusMemory()
+                    }
                 }
 
                 LastWatchedChannelCard(
@@ -122,21 +165,53 @@ fun LastWatchedSection(
                                 tag = "前回視聴"
                             )
                         )
-                    }
+                    },
+                    modifier = Modifier
+                        .focusRequester(specificRequester)
+                        .then(
+                            if (index == 0 && contentFirstItemRequester != null) Modifier.focusRequester(
+                                contentFirstItemRequester
+                            ) else Modifier
+                        )
+                        // 🌟 追加: 左右端でのフォーカス抜け（迷子や設定ボタンへの誤爆）を完全にブロック
+                        .focusProperties {
+                            if (index == 0) left = FocusRequester.Cancel
+                            if (index == channels.size - 1) right = FocusRequester.Cancel
+                        }
+                        .onFocusChanged {
+                            if (it.isFocused || it.hasFocus) {
+                                homeViewModel.lastClickedSection = sectionId
+                                homeViewModel.lastClickedItemId = channel.id
+                            }
+                        }
                 )
             }
         }
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun HotChannelSection(
     hotChannels: List<UiChannelState>,
     konomiIp: String, konomiPort: String,
     modifier: Modifier = Modifier,
+    contentFirstItemRequester: FocusRequester? = null,
     onChannelClick: (Channel) -> Unit,
-    onUpdateHeroInfo: (HomeHeroInfo) -> Unit
+    onUpdateHeroInfo: (HomeHeroInfo) -> Unit,
+    ticketManager: HomeFocusTicketManager,
+    homeViewModel: HomeViewModel,
+    sectionId: String
 ) {
+    val rowState = rememberTvLazyListState()
+
+    LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+        if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE && ticketManager.targetSection == sectionId) {
+            val index = hotChannels.indexOfFirst { it.channel.id == ticketManager.targetItemId }
+            if (index != -1) rowState.scrollToItem(index)
+        }
+    }
+
     Column(modifier = Modifier.animateContentSize()) {
         SectionHeader(
             "今、盛り上がっているチャンネル",
@@ -144,16 +219,31 @@ fun HotChannelSection(
             Modifier.padding(horizontal = 48.dp)
         )
         TvLazyRow(
+            state = rowState,
             modifier = modifier,
             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(hotChannels, key = { "hot_${it.channel.id}" }) { uiState ->
+            itemsIndexed(hotChannels, key = { _, it -> "hot_${it.channel.id}" }) { index, uiState ->
                 val logoUrl = UrlBuilder.getKonomiTvLogoUrl(
                     konomiIp,
                     konomiPort,
                     uiState.channel.displayChannelId
                 )
+
+                val specificRequester = remember { FocusRequester() }
+                LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+                    if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE &&
+                        ticketManager.targetSection == sectionId &&
+                        ticketManager.targetItemId == uiState.channel.id
+                    ) {
+                        delay(150)
+                        specificRequester.safeRequestFocusWithRetry("HomeRestore_Hot")
+                        ticketManager.consume(HomeFocusTicket.HOME_RESTORE)
+                        homeViewModel.clearFocusMemory()
+                    }
+                }
+
                 HotChannelCard(
                     uiState = uiState,
                     logoUrl = logoUrl,
@@ -169,10 +259,218 @@ fun HotChannelSection(
                                 tag = "盛り上がり"
                             )
                         )
-                    }
+                    },
+                    modifier = Modifier
+                        .focusRequester(specificRequester)
+                        .then(
+                            if (index == 0 && contentFirstItemRequester != null) Modifier.focusRequester(
+                                contentFirstItemRequester
+                            ) else Modifier
+                        )
+                        // 🌟 追加: 左右端のブロック
+                        .focusProperties {
+                            if (index == 0) left = FocusRequester.Cancel
+                            if (index == hotChannels.size - 1) right = FocusRequester.Cancel
+                        }
+                        .onFocusChanged {
+                            if (it.isFocused || it.hasFocus) {
+                                homeViewModel.lastClickedSection = sectionId
+                                homeViewModel.lastClickedItemId = uiState.channel.id
+                            }
+                        }
                 )
             }
         }
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+@Composable
+fun WatchHistorySection(
+    watchHistory: List<KonomiHistoryProgram>,
+    konomiIp: String, konomiPort: String,
+    modifier: Modifier = Modifier,
+    contentFirstItemRequester: FocusRequester? = null,
+    onHistoryClick: (KonomiHistoryProgram) -> Unit,
+    onUpdateHeroInfo: (HomeHeroInfo) -> Unit,
+    ticketManager: HomeFocusTicketManager,
+    homeViewModel: HomeViewModel,
+    sectionId: String
+) {
+    val rowState = rememberTvLazyListState()
+
+    LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+        if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE && ticketManager.targetSection == sectionId) {
+            val index =
+                watchHistory.indexOfFirst { it.program.id.toString() == ticketManager.targetItemId }
+            if (index != -1) rowState.scrollToItem(index)
+        }
+    }
+
+    Column(modifier = Modifier.animateContentSize()) {
+        SectionHeader(
+            "録画の視聴履歴",
+            Icons.Default.PlayCircle,
+            Modifier.padding(start = 48.dp, bottom = 12.dp)
+        )
+        TvLazyRow(
+            state = rowState,
+            modifier = modifier,
+            contentPadding = PaddingValues(horizontal = 48.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            itemsIndexed(
+                watchHistory,
+                key = { _, it -> "hist_${it.program.id}" }) { index, history ->
+                val specificRequester = remember { FocusRequester() }
+                LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+                    if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE &&
+                        ticketManager.targetSection == sectionId &&
+                        ticketManager.targetItemId == history.program.id.toString()
+                    ) {
+                        delay(150)
+                        specificRequester.safeRequestFocusWithRetry("HomeRestore_History")
+                        ticketManager.consume(HomeFocusTicket.HOME_RESTORE)
+                        homeViewModel.clearFocusMemory()
+                    }
+                }
+
+                WatchHistoryCard(
+                    history = history,
+                    konomiIp = konomiIp,
+                    konomiPort = konomiPort,
+                    onClick = { onHistoryClick(history) },
+                    onFocus = { progressVal, thumbnailUrl ->
+                        onUpdateHeroInfo(
+                            HomeHeroInfo(
+                                title = history.program.title,
+                                subtitle = "視聴履歴から再開",
+                                description = history.program.description,
+                                imageUrl = thumbnailUrl,
+                                isThumbnail = true,
+                                tag = "視聴履歴",
+                                progress = progressVal
+                            )
+                        )
+                    },
+                    modifier = Modifier
+                        .focusRequester(specificRequester)
+                        .then(
+                            if (index == 0 && contentFirstItemRequester != null) Modifier.focusRequester(
+                                contentFirstItemRequester
+                            ) else Modifier
+                        )
+                        // 🌟 追加: 左右端のブロック
+                        .focusProperties {
+                            if (index == 0) left = FocusRequester.Cancel
+                            if (index == watchHistory.size - 1) right = FocusRequester.Cancel
+                        }
+                        .onFocusChanged {
+                            if (it.isFocused || it.hasFocus) {
+                                homeViewModel.lastClickedSection = sectionId
+                                homeViewModel.lastClickedItemId = history.program.id.toString()
+                            }
+                        }
+                )
+            }
+        }
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+@Composable
+fun UpcomingReserveSection(
+    upcomingReserves: List<ReserveItem>,
+    konomiIp: String, konomiPort: String,
+    modifier: Modifier = Modifier,
+    contentFirstItemRequester: FocusRequester? = null,
+    onReserveClick: (ReserveItem) -> Unit,
+    onNavigateToTab: (Int) -> Unit,
+    onUpdateHeroInfo: (HomeHeroInfo) -> Unit,
+    ticketManager: HomeFocusTicketManager,
+    homeViewModel: HomeViewModel,
+    sectionId: String
+) {
+    val rowState = rememberTvLazyListState()
+
+    LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+        if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE && ticketManager.targetSection == sectionId) {
+            val index =
+                upcomingReserves.indexOfFirst { it.id.toString() == ticketManager.targetItemId }
+            if (index != -1) rowState.scrollToItem(index)
+        }
+    }
+
+    Column(modifier = Modifier.animateContentSize()) {
+        SectionHeader(
+            "これからの録画予約",
+            Icons.Default.RadioButtonChecked,
+            Modifier.padding(horizontal = 48.dp)
+        )
+        TvLazyRow(
+            state = rowState,
+            modifier = modifier,
+            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            itemsIndexed(upcomingReserves, key = { _, it -> "res_${it.id}" }) { index, reserve ->
+                val specificRequester = remember { FocusRequester() }
+                LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+                    if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE &&
+                        ticketManager.targetSection == sectionId &&
+                        ticketManager.targetItemId == reserve.id.toString()
+                    ) {
+                        delay(150)
+                        specificRequester.safeRequestFocusWithRetry("HomeRestore_Reserve")
+                        ticketManager.consume(HomeFocusTicket.HOME_RESTORE)
+                        homeViewModel.clearFocusMemory()
+                    }
+                }
+
+                UpcomingReserveCard(
+                    reserve = reserve,
+                    onClick = { onReserveClick(reserve) },
+                    onFocus = { startFormat ->
+                        onUpdateHeroInfo(
+                            HomeHeroInfo(
+                                title = reserve.program.title,
+                                subtitle = "$startFormat - ${reserve.channel.name}",
+                                description = reserve.program.description ?: "",
+                                imageUrl = UrlBuilder.getKonomiTvLogoUrl(
+                                    konomiIp,
+                                    konomiPort,
+                                    reserve.channel.displayChannelId ?: ""
+                                ),
+                                isThumbnail = false,
+                                tag = "録画予約"
+                            )
+                        )
+                    },
+                    modifier = Modifier
+                        .focusRequester(specificRequester)
+                        .then(
+                            if (index == 0 && contentFirstItemRequester != null) Modifier.focusRequester(
+                                contentFirstItemRequester
+                            ) else Modifier
+                        )
+                        // 🌟 追加: 左右端のブロック
+                        .focusProperties {
+                            if (index == 0) left = FocusRequester.Cancel
+                            if (index == upcomingReserves.size - 1) right = FocusRequester.Cancel
+                        }
+                        .onFocusChanged {
+                            if (it.isFocused || it.hasFocus) {
+                                homeViewModel.lastClickedSection = sectionId
+                                homeViewModel.lastClickedItemId = reserve.id.toString()
+                            }
+                        }
+                )
+            }
+        }
+        NavigationLinkButton(
+            "録画予約リストを表示",
+            Icons.Default.List,
+            onClick = { onNavigateToTab(4) })
     }
 }
 
@@ -184,10 +482,23 @@ fun GenrePickupSection(
     pickupTimeSlot: String,
     konomiIp: String, konomiPort: String,
     modifier: Modifier = Modifier,
+    contentFirstItemRequester: FocusRequester? = null,
     onProgramClick: (EpgProgram) -> Unit,
     onNavigateToTab: (Int) -> Unit,
-    onUpdateHeroInfo: (HomeHeroInfo) -> Unit
+    onUpdateHeroInfo: (HomeHeroInfo) -> Unit,
+    ticketManager: HomeFocusTicketManager,
+    homeViewModel: HomeViewModel,
+    sectionId: String
 ) {
+    val rowState = rememberTvLazyListState()
+
+    LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+        if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE && ticketManager.targetSection == sectionId) {
+            val index = genrePickup.indexOfFirst { it.first.id == ticketManager.targetItemId }
+            if (index != -1) rowState.scrollToItem(index)
+        }
+    }
+
     Column(modifier = Modifier.animateContentSize()) {
         val timePrefix = when (pickupTimeSlot) {
             "朝" -> "今朝の"; "昼" -> "今日の"; else -> "今夜の"
@@ -198,11 +509,27 @@ fun GenrePickupSection(
             Modifier.padding(horizontal = 48.dp)
         )
         TvLazyRow(
+            state = rowState,
             modifier = modifier,
             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(genrePickup, key = { "pick_${it.first.id}" }) { (program, channelName) ->
+            itemsIndexed(
+                genrePickup,
+                key = { _, it -> "pick_${it.first.id}" }) { index, (program, channelName) ->
+                val specificRequester = remember { FocusRequester() }
+                LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+                    if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE &&
+                        ticketManager.targetSection == sectionId &&
+                        ticketManager.targetItemId == program.id
+                    ) {
+                        delay(150)
+                        specificRequester.safeRequestFocusWithRetry("HomeRestore_Pickup")
+                        ticketManager.consume(HomeFocusTicket.HOME_RESTORE)
+                        homeViewModel.clearFocusMemory()
+                    }
+                }
+
                 GenrePickupCard(
                     program = program,
                     channelName = channelName,
@@ -223,7 +550,25 @@ fun GenrePickupSection(
                                 tag = "ピックアップ"
                             )
                         )
-                    }
+                    },
+                    modifier = Modifier
+                        .focusRequester(specificRequester)
+                        .then(
+                            if (index == 0 && contentFirstItemRequester != null) Modifier.focusRequester(
+                                contentFirstItemRequester
+                            ) else Modifier
+                        )
+                        // 🌟 追加: 左右端のブロック
+                        .focusProperties {
+                            if (index == 0) left = FocusRequester.Cancel
+                            if (index == genrePickup.size - 1) right = FocusRequester.Cancel
+                        }
+                        .onFocusChanged {
+                            if (it.isFocused || it.hasFocus) {
+                                homeViewModel.lastClickedSection = sectionId
+                                homeViewModel.lastClickedItemId = program.id
+                            }
+                        }
                 )
             }
         }
@@ -231,101 +576,5 @@ fun GenrePickupSection(
             "番組表を開く",
             Icons.Default.CalendarToday,
             onClick = { onNavigateToTab(3) })
-    }
-}
-
-@RequiresApi(Build.VERSION_CODES.O)
-@Composable
-fun WatchHistorySection(
-    watchHistory: List<KonomiHistoryProgram>,
-    konomiIp: String, konomiPort: String,
-    modifier: Modifier = Modifier,
-    onHistoryClick: (KonomiHistoryProgram) -> Unit,
-    onUpdateHeroInfo: (HomeHeroInfo) -> Unit
-) {
-    Column(modifier = Modifier.animateContentSize()) {
-        SectionHeader(
-            "録画の視聴履歴",
-            Icons.Default.PlayCircle,
-            Modifier.padding(start = 48.dp, bottom = 12.dp)
-        )
-        TvLazyRow(
-            modifier = modifier,
-            contentPadding = PaddingValues(horizontal = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(watchHistory, key = { "hist_${it.program.id}" }) { history ->
-                WatchHistoryCard(
-                    history = history,
-                    konomiIp = konomiIp,
-                    konomiPort = konomiPort,
-                    onClick = { onHistoryClick(history) },
-                    onFocus = { progressVal, thumbnailUrl ->
-                        onUpdateHeroInfo(
-                            HomeHeroInfo(
-                                title = history.program.title,
-                                subtitle = "視聴履歴から再開",
-                                description = history.program.description,
-                                imageUrl = thumbnailUrl,
-                                isThumbnail = true,
-                                tag = "視聴履歴",
-                                progress = progressVal
-                            )
-                        )
-                    }
-                )
-            }
-        }
-    }
-}
-
-@RequiresApi(Build.VERSION_CODES.O)
-@Composable
-fun UpcomingReserveSection(
-    upcomingReserves: List<ReserveItem>,
-    konomiIp: String, konomiPort: String,
-    modifier: Modifier = Modifier,
-    onReserveClick: (ReserveItem) -> Unit,
-    onNavigateToTab: (Int) -> Unit,
-    onUpdateHeroInfo: (HomeHeroInfo) -> Unit
-) {
-    Column(modifier = Modifier.animateContentSize()) {
-        SectionHeader(
-            "これからの録画予約",
-            Icons.Default.RadioButtonChecked,
-            Modifier.padding(horizontal = 48.dp)
-        )
-        TvLazyRow(
-            modifier = modifier,
-            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(upcomingReserves, key = { "res_${it.id}" }) { reserve ->
-                UpcomingReserveCard(
-                    reserve = reserve,
-                    onClick = { onReserveClick(reserve) },
-                    onFocus = { startFormat ->
-                        onUpdateHeroInfo(
-                            HomeHeroInfo(
-                                title = reserve.program.title,
-                                subtitle = "$startFormat - ${reserve.channel.name}",
-                                description = reserve.program.description ?: "",
-                                imageUrl = UrlBuilder.getKonomiTvLogoUrl(
-                                    konomiIp,
-                                    konomiPort,
-                                    reserve.channel.displayChannelId ?: ""
-                                ),
-                                isThumbnail = false,
-                                tag = "録画予約"
-                            )
-                        )
-                    }
-                )
-            }
-        }
-        NavigationLinkButton(
-            "録画予約リストを表示",
-            Icons.Default.List,
-            onClick = { onNavigateToTab(4) })
     }
 }

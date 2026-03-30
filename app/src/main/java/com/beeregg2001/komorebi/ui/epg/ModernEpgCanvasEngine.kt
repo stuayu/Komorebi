@@ -100,6 +100,42 @@ fun ModernEpgCanvasEngine_Smooth(
         remember(visibleTabs.size) { List(visibleTabs.size) { FocusRequester() } }
 
     // ==========================================
+    // 🌟 追加: EPG座標復元システムのトリガーと記憶ロジック
+    // ==========================================
+    val epgViewModel: com.beeregg2001.komorebi.viewmodel.EpgViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel()
+
+    // 詳細画面から戻った際の復元処理
+    LaunchedEffect(epgViewModel.epgRestoreTrigger) {
+        if (epgViewModel.epgRestoreTrigger > 0L) {
+            val targetCh = epgViewModel.lastFocusedChannelId
+            val targetTime = epgViewModel.lastFocusedTime
+            if (targetCh != null && targetTime != null) {
+                Log.i(
+                    "KomorebiFocus",
+                    "[ModernEpgCanvas] 復元トリガー検知！ $targetCh - $targetTime へジャンプします"
+                )
+                epgState.restoreFocus(targetCh, targetTime)
+                delay(150)
+                gridFocusRequester.requestFocus()
+                epgViewModel.clearEpgFocus()
+            }
+        }
+    }
+
+    // 🌟 追加③: 現在のフォーカス位置を常に記憶する処理（EpgStateの判定結果をそのまま使う）
+    androidx.compose.runtime.LaunchedEffect(epgState.focusedCol, epgState.focusedMin, epgState.currentFocusedProgram) {
+        val ch = epgState.uiChannels.getOrNull(epgState.focusedCol)
+        val prog = epgState.currentFocusedProgram // State側でマージン込みで正確に計算された番組
+
+        if (ch != null && prog != null && prog.title != "（番組情報なし）") {
+            val time = com.beeregg2001.komorebi.ui.epg.EpgDataConverter.safeParseTime(prog.start_time, epgState.baseTime)
+            epgViewModel.saveEpgFocus(ch.wrapper.channel.id, time)
+        }
+    }
+    // ==========================================
+
+    // ==========================================
     // 2. UI状態・フラグの管理
     // ==========================================
     var isHeaderVisible by remember { mutableStateOf(true) }

@@ -113,6 +113,21 @@ fun EpgNavigationContainer(
     var isSearchInputFocused by remember { mutableStateOf(false) }
     var isHistoryFocused by remember { mutableStateOf(false) }
 
+
+    // 🌟 追加: EpgViewModelの取得と、詳細画面からの復帰検知
+    val epgViewModel: com.beeregg2001.komorebi.viewmodel.EpgViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    var wasProgramDetailOpen by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(selectedProgram) {
+        if (selectedProgram != null) {
+            // 番組詳細が開かれた
+            wasProgramDetailOpen = true
+        } else if (wasProgramDetailOpen) {
+            // 番組詳細から戻ってきた瞬間にトリガーを引く
+            wasProgramDetailOpen = false
+            epgViewModel.triggerRestore()
+        }
+    }
     LaunchedEffect(isInternalJumping) { onJumpStateChanged(isInternalJumping) }
 
     // ★追加: 詳細画面から戻ってきたときのフォーカス復帰（フォーカスロスト＆クラッシュ対策）

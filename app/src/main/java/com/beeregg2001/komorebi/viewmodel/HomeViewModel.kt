@@ -46,6 +46,15 @@ class HomeViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    // 🌟 追加: ホーム画面からの復帰用「2段階記憶」
+    var lastClickedSection: String? = null
+    var lastClickedItemId: String? = null
+
+    fun clearFocusMemory() {
+        lastClickedSection = null
+        lastClickedItemId = null
+    }
+
     val watchHistory: StateFlow<List<KonomiHistoryProgram>> = repository.getLocalWatchHistory()
         .map { entities -> entities.map { KonomiDataMapper.toUiModel(it) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -104,7 +113,7 @@ class HomeViewModel @Inject constructor(
     private val _baseballDateOffset = MutableStateFlow(0)
     val baseballDateOffset: StateFlow<Int> = _baseballDateOffset.asStateFlow()
 
-    // ★最適化: 野球中継だけを先に抽出したキャッシュを保持し、日付切り替えの負荷をゼロにする
+    // キャッシュを保持し、日付切り替えの負荷をゼロにする
     private var cachedBaseballPrograms: List<Pair<EpgProgram, EpgChannel>> = emptyList()
 
     fun getHotChannels(liveRows: List<LiveRowState>): List<UiChannelState> {
@@ -147,11 +156,9 @@ class HomeViewModel @Inject constructor(
                 }
             }.awaitAll().flatten()
 
-            // ★最適化: 全番組データから、日付関係なく「野球中継」だけを抽出してキャッシュする
             cachedBaseballPrograms = allPrograms.flatMap { wrapper ->
                 wrapper.programs.map { it to wrapper.channel }
             }.filter { (prog, _) ->
-                // 高速な文字列判定を先に行い、無関係な番組を弾く（Early Exit）
                 val isSports = prog.genres?.any { it.major.contains("スポーツ") } == true
                 if (!isSports) return@filter false
 
@@ -180,7 +187,6 @@ class HomeViewModel @Inject constructor(
             _genrePickupPrograms.value =
                 filterGenrePickup(allPrograms, genre, timeSetting, isExcludePaid)
 
-            // キャッシュから本日の試合を生成
             _favoriteBaseballGames.value = filterFavoriteBaseballGames(
                 cachedBaseballPrograms,
                 favoriteBaseballTeams.value,
@@ -194,7 +200,6 @@ class HomeViewModel @Inject constructor(
             _baseballDateOffset.value = offset
             viewModelScope.launch {
                 if (cachedBaseballPrograms.isNotEmpty()) {
-                    // ★最適化: キャッシュ済みの数十件の野球中継リストから日付で絞り込むだけなので一瞬で完了する
                     _favoriteBaseballGames.value = filterFavoriteBaseballGames(
                         cachedBaseballPrograms,
                         favoriteBaseballTeams.value,
@@ -229,7 +234,6 @@ class HomeViewModel @Inject constructor(
             val gamesForTeam = baseballPrograms.filter { (prog, _) ->
                 prog.title.contains(team) || prog.description.contains(team)
             }.filter { (prog, _) ->
-                // 重い日付のパース処理は、絞り込み済みの対象番組に対してのみ実行する
                 val start = runCatching { OffsetDateTime.parse(prog.start_time) }.getOrNull()
                     ?: return@filter false
                 start.isAfter(targetDateStart) && start.isBefore(targetDateEnd)
@@ -278,7 +282,6 @@ class HomeViewModel @Inject constructor(
         allPrograms.flatMap { wrapper ->
             wrapper.programs.map { it to wrapper.channel.name }
         }.filter { (prog, _) ->
-            // ★最適化: 重い日付パースの前に、高速なジャンル・有料放送チェックを行い、合致しないものを弾く
             val isGenre = prog.genres?.any { it.major.contains(genre) } == true
             if (!isGenre) return@filter false
 

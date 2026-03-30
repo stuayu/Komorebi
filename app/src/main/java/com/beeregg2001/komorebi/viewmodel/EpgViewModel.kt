@@ -107,6 +107,26 @@ class EpgViewModel @Inject constructor(
     private val _isSearching = MutableStateFlow(false)
     val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
 
+    // 🌟 追加: EPGフォーカス記憶と復元トリガー
+    var lastFocusedChannelId: String? = null
+    var lastFocusedTime: OffsetDateTime? = null
+    var epgRestoreTrigger by androidx.compose.runtime.mutableStateOf(0L)
+        private set
+
+    fun saveEpgFocus(channelId: String, time: OffsetDateTime) {
+        lastFocusedChannelId = channelId
+        lastFocusedTime = time
+    }
+
+    fun triggerRestore() {
+        epgRestoreTrigger = System.currentTimeMillis()
+    }
+
+    fun clearEpgFocus() {
+        lastFocusedChannelId = null
+        lastFocusedTime = null
+    }
+
     init {
         loadSearchHistory() // ★追加: アプリ起動時に履歴を読み込む
         loadInitialData()

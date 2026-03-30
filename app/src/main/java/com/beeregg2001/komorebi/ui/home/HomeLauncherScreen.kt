@@ -152,12 +152,22 @@ fun HomeLauncherScreen(
     }
 
     LaunchedEffect(isReturningFromPlayer) {
+        Log.i(
+            "KomorebiFocus",
+            "[HomeLauncher] isReturningFromPlayer changed: $isReturningFromPlayer, isFullScreenMode: $isFullScreenMode"
+        )
         if (isReturningFromPlayer && !isFullScreenMode) {
             ui.safeHouseRequester.safeRequestFocusWithRetry("SafeHouse_Return")
             delay(150)
 
             if (safeTabIndex != 1 && safeTabIndex != 2) {
-                ticketManager.issue(HomeFocusTicket.TAB_BAR)
+                val section = homeViewModel.lastClickedSection
+                val itemId = homeViewModel.lastClickedItemId
+                if (safeTabIndex == 0 && section != null && itemId != null) {
+                    ticketManager.issueForHomeRestore(section, itemId)
+                } else {
+                    ticketManager.issue(HomeFocusTicket.TAB_BAR)
+                }
             }
         }
     }
@@ -173,16 +183,29 @@ fun HomeLauncherScreen(
         }
     }
 
-    // 🌟 修正: isFullScreenMode が false (閉じた時) の処理を整理
+    // 🌟 修正: プレイヤー以外の全画面UI（番組詳細など）から戻った場合のチケット発行を賢くした
     LaunchedEffect(isFullScreenMode) {
         if (!isFullScreenMode && !isReturningFromPlayer) {
             delay(300)
             if (safeTabIndex == 4) {
-                Log.i(
-                    "KomorebiFocus",
-                    "[HomeLauncher] 録画予約タブ(Index 4)への復帰なので、フォーカス復元は子画面(ReserveListScreen)のチケットシステムに任せます。"
-                )
-                // ⚠️ ここでの強制的なフォーカス上書き（ui.contentFirstItemRequesters[4].safeRequestFocus）を削除しました！
+                // 録画予約からの復帰はReserveListScreen内部のチケットに任せる
+            } else if (safeTabIndex == 0) {
+                // 🌟 追加: ホームタブの場合、ViewModelに記憶があれば HOME_RESTORE チケットを発行する
+                val section = homeViewModel.lastClickedSection
+                val itemId = homeViewModel.lastClickedItemId
+                if (section != null && itemId != null) {
+                    Log.i(
+                        "KomorebiFocus",
+                        "[HomeLauncher] 全画面UI終了を検知。記憶から HOME_RESTORE を発行します。"
+                    )
+                    ticketManager.issueForHomeRestore(section, itemId)
+                } else {
+                    Log.i(
+                        "KomorebiFocus",
+                        "[HomeLauncher] 全画面UI終了を検知。記憶がないため TAB_BAR を発行します。"
+                    )
+                    ticketManager.issue(HomeFocusTicket.TAB_BAR)
+                }
             } else if (safeTabIndex != 3) {
                 ticketManager.issue(HomeFocusTicket.TAB_BAR)
             }
@@ -228,6 +251,12 @@ fun HomeLauncherScreen(
                 ui.contentFirstItemRequesters.getOrNull(safeTabIndex)
                     ?.safeRequestFocusWithRetry("HomeTicket_CONTENT_TOP")
                 ticketManager.consume(HomeFocusTicket.CONTENT_TOP)
+            }
+
+            HomeFocusTicket.HOME_RESTORE -> {
+                if (isReturningFromPlayer) {
+                    onReturnFocusConsumed()
+                }
             }
 
             else -> {}
@@ -397,7 +426,9 @@ fun HomeLauncherScreen(
                                 ?: lastPlayerChannelId,
                             lastFocusedProgramId = lastPlayerProgramId,
                             isTopNavFocused = ui.topNavHasFocus,
-                            onUiReady = { onUiReady(); ui.isCurrentTabContentReady = true }
+                            onUiReady = { onUiReady(); ui.isCurrentTabContentReady = true },
+                            ticketManager = ticketManager,
+                            homeViewModel = homeViewModel
                         )
 
                         "ライブ" -> {
@@ -498,7 +529,6 @@ fun HomeLauncherScreen(
                                 contentFirstItemRequester = ui.contentFirstItemRequesters[4],
                                 topNavFocusRequester = ui.tabFocusRequesters[4],
                                 groupedChannels = groupedChannels,
-                                // 🌟 追加: ダイアログの開閉状態を子画面に伝達し、復帰トリガーにする
                                 isReserveOverlayOpen = isReserveOverlayOpen
                             )
                             LaunchedEffect(Unit) {
