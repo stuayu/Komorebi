@@ -88,6 +88,7 @@ fun LivePlayerScreen(
     konomiIp: String = "192-168-100-60.local.konomi.tv",
     konomiPort: String = "7000",
     initialQuality: String = "1080p-60fps",
+    isBaseballMode: Boolean = false,
     isMiniListOpen: Boolean,
     onMiniListToggle: (Boolean) -> Unit,
     showOverlay: Boolean,
@@ -111,11 +112,26 @@ fun LivePlayerScreen(
     val scope = rememberCoroutineScope()
 
     val ps = rememberLivePlayerState(context, initialQuality)
+
+    // ViewModel側で監視している2種類のリストを受け取る
     val groupedChannels by channelViewModel.groupedChannels.collectAsState()
-    val flatChannels = remember(groupedChannels) { groupedChannels.values.flatten() }
-    val currentChannelItem by remember(channel.id, groupedChannels) {
-        derivedStateOf { flatChannels.find { it.id == channel.id } ?: channel }
+    val baseballGroupedChannels by channelViewModel.baseballGroupedChannels.collectAsState()
+
+    // ==========================================
+    // 🌟 修正: プロ野球特化モードのリスト切り替え（ViewModelへ処理を委譲し超軽量化）
+    // UIは計算を一切行わず、状態に応じてどちらのリストを使うかを選ぶだけ！
+    // ==========================================
+    val displayGroupedChannels =
+        remember(groupedChannels, baseballGroupedChannels, isBaseballMode) {
+            if (isBaseballMode) baseballGroupedChannels else groupedChannels
+        }
+
+    val displayFlatChannels =
+        remember(displayGroupedChannels) { displayGroupedChannels.values.flatten() }
+    val currentChannelItem by remember(channel.id, displayGroupedChannels) {
+        derivedStateOf { displayFlatChannels.find { it.id == channel.id } ?: channel }
     }
+    // ==========================================
 
     val commentSpeedStr by settingsViewModel.commentSpeed.collectAsState()
     val commentFontSizeStr by settingsViewModel.commentFontSize.collectAsState()
@@ -420,8 +436,6 @@ fun LivePlayerScreen(
     var hasStoppedByLifecycle by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // ★修正: メインとサブのライフサイクル管理を完全に分離し、
-    // サブ生成時に巻き添えでメインがrelease()されるバグを防止しました。
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
@@ -461,7 +475,6 @@ fun LivePlayerScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            // サブのreleaseは別のDisposableEffectで担保
         }
     }
 
@@ -509,7 +522,6 @@ fun LivePlayerScreen(
         runCatching {
             exoPlayer.stop()
             exoPlayer.clearMediaItems()
-            // ★追加: 画質変更(720p)を伴う再リクエスト時、サーバー側のチューナー解放を少し待つための猶予
             if (ps.isDualDisplayMode) delay(200)
             exoPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
             exoPlayer.prepare()
@@ -562,7 +574,6 @@ fun LivePlayerScreen(
             runCatching {
                 dualExoPlayer.stop()
                 dualExoPlayer.clearMediaItems()
-                // ★追加: メイン画面のリクエストと完全に被らないようにタイミングをずらす
                 delay(300)
                 dualExoPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
                 dualExoPlayer.prepare()
@@ -876,7 +887,7 @@ fun LivePlayerScreen(
                     isManualOverlay = isManualOverlay,
                     isPinnedOverlay = isPinnedOverlay,
                     currentChannelItem = currentChannelItem,
-                    groupedChannels = groupedChannels,
+                    groupedChannels = displayGroupedChannels,
                     scrollState = scrollState,
                     scope = scope,
                     onChannelSelect = onChannelSelect,
@@ -952,9 +963,11 @@ fun LivePlayerScreen(
             val isVideoVisible =
                 ps.currentStreamSource == StreamSource.MIRAKURUN || ps.sseStatus == "ONAir"
             if (!isVideoVisible) {
-                Box(modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black))
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                )
             }
 
             if (isHeavyUiReady) {
@@ -1057,7 +1070,7 @@ fun LivePlayerScreen(
                 .fillMaxWidth()
         ) {
             ChannelListOverlay(
-                groupedChannels,
+                displayGroupedChannels,
                 currentChannelItem.id,
                 { selectedChannel ->
                     if (!ps.isDualDisplayMode) {

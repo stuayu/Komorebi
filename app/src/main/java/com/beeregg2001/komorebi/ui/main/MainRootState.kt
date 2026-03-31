@@ -46,6 +46,9 @@ class MainRootState {
     var lastSelectedProgramId by mutableStateOf<String?>(null)
     var isReturningFromPlayer by mutableStateOf(false)
 
+    // ★追加: プロ野球特化モードのフラグ
+    var isBaseballMode by mutableStateOf(false)
+
     // ★追加: 再生から戻った際にフォーカスすべき録画番組のID
     var lastPlayedRecordingId by mutableStateOf<Int?>(null)
 

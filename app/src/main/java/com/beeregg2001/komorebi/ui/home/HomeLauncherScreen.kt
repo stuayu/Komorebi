@@ -70,7 +70,7 @@ fun HomeLauncherScreen(
     groupedChannels: Map<String, List<Channel>>,
     mirakurunIp: String, mirakurunPort: String,
     konomiIp: String, konomiPort: String,
-    onChannelClick: (Channel?) -> Unit,
+    onChannelClick: (Channel?, Boolean) -> Unit, // ★修正: Boolean(野球モード)を追加
     selectedChannel: Channel?,
     onTabChange: (Int) -> Unit,
     initialTabIndex: Int = 0,
@@ -183,27 +183,17 @@ fun HomeLauncherScreen(
         }
     }
 
-    // 🌟 修正: プレイヤー以外の全画面UI（番組詳細など）から戻った場合のチケット発行を賢くした
     LaunchedEffect(isFullScreenMode) {
         if (!isFullScreenMode && !isReturningFromPlayer) {
             delay(300)
             if (safeTabIndex == 4) {
                 // 録画予約からの復帰はReserveListScreen内部のチケットに任せる
             } else if (safeTabIndex == 0) {
-                // 🌟 追加: ホームタブの場合、ViewModelに記憶があれば HOME_RESTORE チケットを発行する
                 val section = homeViewModel.lastClickedSection
                 val itemId = homeViewModel.lastClickedItemId
                 if (section != null && itemId != null) {
-                    Log.i(
-                        "KomorebiFocus",
-                        "[HomeLauncher] 全画面UI終了を検知。記憶から HOME_RESTORE を発行します。"
-                    )
                     ticketManager.issueForHomeRestore(section, itemId)
                 } else {
-                    Log.i(
-                        "KomorebiFocus",
-                        "[HomeLauncher] 全画面UI終了を検知。記憶がないため TAB_BAR を発行します。"
-                    )
                     ticketManager.issue(HomeFocusTicket.TAB_BAR)
                 }
             } else if (safeTabIndex != 3) {
@@ -394,7 +384,12 @@ fun HomeLauncherScreen(
                             pickupGenreName = ui.pickupGenreLabel,
                             pickupTimeSlot = ui.genrePickupTimeSlot,
                             groupedChannels = groupedChannels,
-                            onChannelClick = onChannelClick,
+                            onChannelClick = {
+                                if (it != null) onChannelClick(
+                                    it,
+                                    false
+                                )
+                            }, // ★修正: falseを渡す
                             onHistoryClick = { historyItem ->
                                 val programId = historyItem.program.id.toIntOrNull()
                                 val betterProgram = ui.recentRecordings.find { it.id == programId }
@@ -437,7 +432,7 @@ fun HomeLauncherScreen(
                                 epgViewModel = epgViewModel,
                                 groupedChannels = groupedChannels,
                                 selectedChannel = selectedChannel,
-                                onChannelClick = onChannelClick,
+                                onChannelClick = { onChannelClick(it, false) }, // ★修正: falseを渡す
                                 onFocusChannelChange = { ui.internalLastPlayerChannelId = it },
                                 mirakurunIp = mirakurunIp,
                                 mirakurunPort = mirakurunPort,
@@ -544,9 +539,9 @@ fun HomeLauncherScreen(
                                 onDateOffsetChange = { homeViewModel.updateBaseballDateOffset(it) },
                                 onChannelClick = { channel ->
                                     val matchedChannel = groupedChannels.values.flatten()
-                                        .find { it.id == channel.id }; if (matchedChannel != null) onChannelClick(
-                                    matchedChannel
-                                )
+                                        .find { it.id == channel.id }
+                                    // ★修正: プロ野球タブからの遷移時は true を渡す！
+                                    if (matchedChannel != null) onChannelClick(matchedChannel, true)
                                 },
                                 onProgramClick = { onEpgProgramSelected(it) },
                                 topNavFocusRequester = ui.tabFocusRequesters[5],

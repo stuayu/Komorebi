@@ -517,15 +517,29 @@ fun SettingsScreen(
                                 }
                             },
                             onStart = {
-                                uiState.activeDialog = SettingDialogState.Selection(
-                                    AppStrings.SETTINGS_ITEM_STARTUP_TAB,
+                                // ★ 修正: フォロー球団が設定されている場合のみ、プロ野球タブを選択可能にする
+                                val options = if (prefs.favoriteBaseballTeams.isNotEmpty()) {
+                                    listOf(
+                                        AppStrings.SETTINGS_VALUE_TAB_HOME to "ホーム",
+                                        AppStrings.SETTINGS_VALUE_TAB_LIVE to "ライブ",
+                                        AppStrings.SETTINGS_VALUE_TAB_VIDEO to "ビデオ",
+                                        AppStrings.SETTINGS_VALUE_TAB_EPG to "番組表",
+                                        AppStrings.SETTINGS_VALUE_TAB_RESERVE to "録画予約",
+                                        "プロ野球" to "プロ野球"
+                                    )
+                                } else {
                                     listOf(
                                         AppStrings.SETTINGS_VALUE_TAB_HOME to "ホーム",
                                         AppStrings.SETTINGS_VALUE_TAB_LIVE to "ライブ",
                                         AppStrings.SETTINGS_VALUE_TAB_VIDEO to "ビデオ",
                                         AppStrings.SETTINGS_VALUE_TAB_EPG to "番組表",
                                         AppStrings.SETTINGS_VALUE_TAB_RESERVE to "録画予約"
-                                    ),
+                                    )
+                                }
+
+                                uiState.activeDialog = SettingDialogState.Selection(
+                                    AppStrings.SETTINGS_ITEM_STARTUP_TAB,
+                                    options,
                                     prefs.startupTab
                                 ) {
                                     scope.launch {
@@ -606,15 +620,29 @@ fun SettingsScreen(
                             startupChannelName = channelName, // ★追加
                             sidebarR = categoryFocusRequesters[5],
                             onEditTab = {
-                                uiState.activeDialog = SettingDialogState.Selection(
-                                    AppStrings.SETTINGS_ITEM_STARTUP_TAB,
+                                // ★ 修正: フォロー球団が設定されている場合のみ、プロ野球タブを選択可能にする
+                                val options = if (prefs.favoriteBaseballTeams.isNotEmpty()) {
+                                    listOf(
+                                        AppStrings.SETTINGS_VALUE_TAB_HOME to "ホーム",
+                                        AppStrings.SETTINGS_VALUE_TAB_LIVE to "ライブ",
+                                        AppStrings.SETTINGS_VALUE_TAB_VIDEO to "ビデオ",
+                                        AppStrings.SETTINGS_VALUE_TAB_EPG to "番組表",
+                                        AppStrings.SETTINGS_VALUE_TAB_RESERVE to "録画予約",
+                                        "プロ野球" to "プロ野球"
+                                    )
+                                } else {
                                     listOf(
                                         AppStrings.SETTINGS_VALUE_TAB_HOME to "ホーム",
                                         AppStrings.SETTINGS_VALUE_TAB_LIVE to "ライブ",
                                         AppStrings.SETTINGS_VALUE_TAB_VIDEO to "ビデオ",
                                         AppStrings.SETTINGS_VALUE_TAB_EPG to "番組表",
                                         AppStrings.SETTINGS_VALUE_TAB_RESERVE to "録画予約"
-                                    ),
+                                    )
+                                }
+
+                                uiState.activeDialog = SettingDialogState.Selection(
+                                    AppStrings.SETTINGS_ITEM_STARTUP_TAB,
+                                    options,
                                     prefs.startupTab
                                 ) {
                                     scope.launch {

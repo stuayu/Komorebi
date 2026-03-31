@@ -132,7 +132,7 @@ fun MainRootScreen(
         if (!state.hasAppliedStartupTab) {
             val tab = settingsViewModel.getStartupTabOnce()
             state.currentTabIndex = when (tab) {
-                "ホーム" -> 0; "ライブ" -> 1; "ビデオ" -> 2; "番組表" -> 3; "録画予約" -> 4; else -> 0
+                "ホーム" -> 0; "ライブ" -> 1; "ビデオ" -> 2; "番組表" -> 3; "録画予約" -> 4; "プロ野球" -> 5; else -> 0
             }
             channelViewModel.fetchChannels()
             state.hasAppliedStartupTab = true
@@ -158,6 +158,7 @@ fun MainRootScreen(
                     }
 
                     state.selectedChannel = targetChannel
+                    state.isBaseballMode = false // ★起動時は通常モード
                     state.lastSelectedChannelId = targetChannel.id
                     state.lastSelectedProgramId = null
                     homeViewModel.saveLastChannel(targetChannel)
@@ -303,6 +304,7 @@ fun MainRootScreen(
                                 mirakurunIp = mirakurunIp, mirakurunPort = mirakurunPort,
                                 konomiIp = konomiIp, konomiPort = konomiPort,
                                 initialQuality = defaultLiveQuality,
+                                isBaseballMode = state.isBaseballMode, // ★追加: プロ野球モードを渡す
                                 isMiniListOpen = state.isPlayerMiniListOpen,
                                 onMiniListToggle = { state.isPlayerMiniListOpen = it },
                                 showOverlay = state.playerShowOverlay,
@@ -364,9 +366,7 @@ fun MainRootScreen(
                                     state.selectedProgram = program
                                     state.lastSelectedProgramId = program.id.toString()
 
-                                    // ★追加: 再生した番組のIDを記憶しておく
                                     state.lastPlayedRecordingId = program.id
-
                                     state.showPlayerControls = true
                                     state.isReturningFromPlayer = false
                                 },
@@ -378,7 +378,6 @@ fun MainRootScreen(
                                     }
                                     recordViewModel.searchRecordings("")
                                 },
-                                // ★追加: プレイヤーからの復帰情報とコールバックを渡す
                                 isReturningFromPlayer = state.isReturningFromPlayer,
                                 lastPlayedProgramId = state.lastPlayedRecordingId,
                                 onReturnFocusConsumed = { state.isReturningFromPlayer = false }
@@ -462,8 +461,9 @@ fun MainRootScreen(
                                 initialTabIndex = state.currentTabIndex,
                                 onTabChange = { state.currentTabIndex = it },
                                 selectedChannel = state.selectedChannel,
-                                onChannelClick = { channel ->
+                                onChannelClick = { channel, isBaseballMode -> // ★修正: 野球モードを受け取る
                                     state.selectedChannel = channel
+                                    state.isBaseballMode = isBaseballMode // ★追加
                                     if (channel != null) {
                                         state.lastSelectedChannelId = channel.id
                                         state.lastSelectedProgramId = null
@@ -509,6 +509,7 @@ fun MainRootScreen(
                                         .find { ch -> ch.id == channelId }
                                     if (channel != null) {
                                         state.selectedChannel = channel
+                                        state.isBaseballMode = false // ★追加: EPGからのジャンプは通常モード
                                         state.lastSelectedChannelId = channelId
                                         state.lastSelectedProgramId = null
                                         homeViewModel.saveLastChannel(channel)
@@ -611,8 +612,9 @@ fun MainRootScreen(
                         val channel =
                             groupedChannels.values.flatten().find { ch -> ch.id == it.channel_id }
                         if (channel != null) {
-                            state.selectedChannel = channel; state.lastSelectedChannelId =
-                                channel.id
+                            state.selectedChannel = channel
+                            state.isBaseballMode = false // ★追加: 詳細画面からの再生は通常モード
+                            state.lastSelectedChannelId = channel.id
                             state.lastSelectedProgramId = null; homeViewModel.saveLastChannel(
                                 channel
                             )
@@ -630,7 +632,33 @@ fun MainRootScreen(
                     onEpgReserveClick = { program, keyword, daysOfWeek, startH, startM, endH, endM, exc, tOnly, bType, fuzzy, dup, pri, relay, exact ->
                         val channel =
                             groupedChannels.values.flatten().find { it.id == program.channel_id }
-                        val finalTsId = channel?.transportStreamId?.toInt() ?: 0
+
+                        var finalTsId = channel?.transportStreamId?.toInt() ?: 0
+
+                        if (finalTsId == 0) {
+                            val currentEpgState = epgViewModel.uiState
+                            if (currentEpgState is EpgUiState.Success) {
+                                val epgChannel =
+                                    currentEpgState.data.find { it.channel.id == program.channel_id }?.channel
+                                if (epgChannel != null) {
+                                    finalTsId = epgChannel.transport_stream_id
+                                }
+                            }
+                        }
+
+                        if (finalTsId == 0) {
+                            val searchResults = epgViewModel.searchResults.value
+                            val matchedResult =
+                                searchResults.find { it.program.id == program.id || it.channel.id == program.channel_id }
+                            if (matchedResult != null) {
+                                finalTsId = matchedResult.channel.transport_stream_id
+                            }
+                        }
+
+                        if (finalTsId == 0 && program.network_id in 32736..32742) {
+                            finalTsId = program.network_id
+                        }
+
                         reserveViewModel.addEpgReserve(
                             keyword = keyword,
                             networkId = program.network_id,
