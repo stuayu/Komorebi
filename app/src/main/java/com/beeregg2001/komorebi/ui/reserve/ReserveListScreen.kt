@@ -144,6 +144,15 @@ fun ReserveListScreen(
     var restoreConditionId by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(isLoading) {
+        // ★修正: オーバーレイ（ダイアログ等）が開いている時は、裏でロードが走ってもSafeHouseへ逃がさない！
+        if (isReserveOverlayOpen) {
+            Log.i(
+                "KomorebiFocus",
+                "[ReserveList] オーバーレイ起動中のためリロード時のフォーカス退避をスキップします"
+            )
+            return@LaunchedEffect
+        }
+
         if (isLoading) {
             val resId = viewModel.lastClickedReserveId
             val condId = viewModel.lastClickedConditionId
@@ -343,7 +352,6 @@ fun ReserveListScreen(
                             .focusProperties {
                                 down = listFocusRequester
                                 up = topNavFocusRequester ?: FocusRequester.Default
-                                // 🌟 追加: タブの左右端でのフォーカス抜け落ち防止
                                 if (index == 0) left = FocusRequester.Cancel
                                 if (index == tabs.lastIndex) right = FocusRequester.Cancel
                             }

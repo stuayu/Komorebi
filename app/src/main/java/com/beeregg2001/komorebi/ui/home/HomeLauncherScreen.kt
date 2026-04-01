@@ -59,6 +59,7 @@ fun DigitalClock(modifier: Modifier = Modifier) {
     )
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun HomeLauncherScreen(
@@ -70,7 +71,7 @@ fun HomeLauncherScreen(
     groupedChannels: Map<String, List<Channel>>,
     mirakurunIp: String, mirakurunPort: String,
     konomiIp: String, konomiPort: String,
-    onChannelClick: (Channel?, Boolean) -> Unit, // ★修正: Boolean(野球モード)を追加
+    onChannelClick: (Channel?, Boolean) -> Unit,
     selectedChannel: Channel?,
     onTabChange: (Int) -> Unit,
     initialTabIndex: Int = 0,
@@ -336,6 +337,14 @@ fun HomeLauncherScreen(
                                         down =
                                             if (safeTabIndex == index && ui.isCurrentTabContentReady) ui.contentFirstItemRequesters[index] else FocusRequester.Default
                                         canFocus = !(safeTabIndex == 3 && ui.isEpgJumping)
+
+                                        // 🌟 タブから「上」へのフォーカス移動をブロック
+                                        up = FocusRequester.Cancel
+
+                                        // 🌟 一番左のタブから「左」へのフォーカス移動をブロック
+                                        if (index == 0) {
+                                            left = FocusRequester.Cancel
+                                        }
                                     }) {
                                 Text(
                                     text = title,
@@ -354,8 +363,14 @@ fun HomeLauncherScreen(
                         modifier = Modifier
                             .focusRequester(ui.settingsFocusRequester)
                             .focusProperties {
-                                left = ui.tabFocusRequesters.last(); canFocus =
-                                !(safeTabIndex == 3 && ui.isEpgJumping)
+                                // ★ 修正: 未初期化エラーを防ぐため、「現在実際に表示されている一番右のタブ」を確実に戻り先に指定
+                                left = ui.tabFocusRequesters[tabs.lastIndex]
+
+                                canFocus = !(safeTabIndex == 3 && ui.isEpgJumping)
+
+                                // 🌟 設定ボタンから「上」と「右」へのフォーカス移動をブロック
+                                up = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
                             },
                         colors = IconButtonDefaults.colors(
                             focusedContainerColor = colors.textPrimary,
@@ -389,7 +404,7 @@ fun HomeLauncherScreen(
                                     it,
                                     false
                                 )
-                            }, // ★修正: falseを渡す
+                            },
                             onHistoryClick = { historyItem ->
                                 val programId = historyItem.program.id.toIntOrNull()
                                 val betterProgram = ui.recentRecordings.find { it.id == programId }
@@ -432,7 +447,7 @@ fun HomeLauncherScreen(
                                 epgViewModel = epgViewModel,
                                 groupedChannels = groupedChannels,
                                 selectedChannel = selectedChannel,
-                                onChannelClick = { onChannelClick(it, false) }, // ★修正: falseを渡す
+                                onChannelClick = { onChannelClick(it, false) },
                                 onFocusChannelChange = { ui.internalLastPlayerChannelId = it },
                                 mirakurunIp = mirakurunIp,
                                 mirakurunPort = mirakurunPort,
@@ -540,7 +555,6 @@ fun HomeLauncherScreen(
                                 onChannelClick = { channel ->
                                     val matchedChannel = groupedChannels.values.flatten()
                                         .find { it.id == channel.id }
-                                    // ★修正: プロ野球タブからの遷移時は true を渡す！
                                     if (matchedChannel != null) onChannelClick(matchedChannel, true)
                                 },
                                 onProgramClick = { onEpgProgramSelected(it) },

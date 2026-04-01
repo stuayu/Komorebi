@@ -461,9 +461,9 @@ fun MainRootScreen(
                                 initialTabIndex = state.currentTabIndex,
                                 onTabChange = { state.currentTabIndex = it },
                                 selectedChannel = state.selectedChannel,
-                                onChannelClick = { channel, isBaseballMode -> // ★修正: 野球モードを受け取る
+                                onChannelClick = { channel, isBaseballMode ->
                                     state.selectedChannel = channel
-                                    state.isBaseballMode = isBaseballMode // ★追加
+                                    state.isBaseballMode = isBaseballMode
                                     if (channel != null) {
                                         state.lastSelectedChannelId = channel.id
                                         state.lastSelectedProgramId = null
@@ -495,7 +495,8 @@ fun MainRootScreen(
                                 onConditionClick = { condition ->
                                     state.editingCondition = condition
                                 },
-                                isReserveOverlayOpen = state.selectedReserve != null,
+                                // ★修正: ここに状態を全て追加し、ダイアログ表示中のフォーカス強奪を防ぎます
+                                isReserveOverlayOpen = state.selectedReserve != null || state.editingCondition != null,
                                 epgSelectedProgram = state.epgSelectedProgram,
                                 onEpgProgramSelected = { state.epgSelectedProgram = it },
                                 isEpgJumpMenuOpen = state.isEpgJumpMenuOpen,
@@ -509,7 +510,7 @@ fun MainRootScreen(
                                         .find { ch -> ch.id == channelId }
                                     if (channel != null) {
                                         state.selectedChannel = channel
-                                        state.isBaseballMode = false // ★追加: EPGからのジャンプは通常モード
+                                        state.isBaseballMode = false
                                         state.lastSelectedChannelId = channelId
                                         state.lastSelectedProgramId = null
                                         homeViewModel.saveLastChannel(channel)
@@ -613,7 +614,7 @@ fun MainRootScreen(
                             groupedChannels.values.flatten().find { ch -> ch.id == it.channel_id }
                         if (channel != null) {
                             state.selectedChannel = channel
-                            state.isBaseballMode = false // ★追加: 詳細画面からの再生は通常モード
+                            state.isBaseballMode = false
                             state.lastSelectedChannelId = channel.id
                             state.lastSelectedProgramId = null; homeViewModel.saveLastChannel(
                                 channel
