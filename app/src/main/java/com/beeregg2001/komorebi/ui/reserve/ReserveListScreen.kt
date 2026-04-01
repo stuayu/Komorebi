@@ -17,7 +17,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
@@ -99,6 +98,8 @@ fun ReserveListScreen(
     contentFirstItemRequester: FocusRequester? = null,
     topNavFocusRequester: FocusRequester? = null,
     isReserveOverlayOpen: Boolean = false,
+    isReturningFromPlayer: Boolean = false, // ★追加: プレイヤーからの復帰フラグ
+    onReturnFocusConsumed: () -> Unit = {}, // ★追加: 復帰完了時のコールバック
     viewModel: ReserveViewModel = hiltViewModel()
 ) {
     val reserves by viewModel.reserves.collectAsState()
@@ -123,6 +124,25 @@ fun ReserveListScreen(
     val conditionListState = rememberTvLazyListState()
 
     var previousOverlayOpen by remember { mutableStateOf(isReserveOverlayOpen) }
+
+    // ★追加: プレイヤーから復帰した際のチケット発行処理
+    LaunchedEffect(isReturningFromPlayer) {
+        if (isReturningFromPlayer) {
+            Log.i("KomorebiFocus", "[ReserveList] プレイヤーから復帰しました。チケットを発行します。")
+            delay(150)
+            val conditionId = viewModel.lastClickedConditionId
+            val reserveId = viewModel.lastClickedReserveId
+            if (conditionId != null) {
+                ticketManager.issueForCondition(conditionId)
+            } else if (reserveId != null) {
+                ticketManager.issueForReserve(reserveId)
+            } else {
+                contentFirstItemRequester?.safeRequestFocusWithRetry("ReserveListFallback")
+            }
+            onReturnFocusConsumed() // 処理完了を通知
+        }
+    }
+
     LaunchedEffect(isReserveOverlayOpen) {
         if (previousOverlayOpen && !isReserveOverlayOpen) {
             Log.i("KomorebiFocus", "[ReserveList] オーバーレイが閉じました。チケットを発行します。")
@@ -144,15 +164,13 @@ fun ReserveListScreen(
     var restoreConditionId by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(isLoading) {
-        // ★修正: オーバーレイ（ダイアログ等）が開いている時は、裏でロードが走ってもSafeHouseへ逃がさない！
         if (isReserveOverlayOpen) {
             Log.i(
                 "KomorebiFocus",
-                "[ReserveList] オーバーレイ起動中のためリロード時のフォーカス退避をスキップします"
+                "[ReserveList] オーバーレイ起動中のためリロード時のフォーカス退避・復元をスキップします"
             )
             return@LaunchedEffect
         }
-
         if (isLoading) {
             val resId = viewModel.lastClickedReserveId
             val condId = viewModel.lastClickedConditionId
@@ -310,6 +328,25 @@ fun ReserveListScreen(
                 .focusable()
         )
 
+        if (contentFirstItemRequester != null) {
+            Box(
+                modifier = Modifier
+                    .size(1.dp)
+                    .alpha(0f)
+                    .focusRequester(contentFirstItemRequester)
+                    .onFocusChanged {
+                        if (it.isFocused) {
+                            Log.i("KomorebiFocus", "[ReserveList] TopNavからDOWN -> 内部タブへフォーカスを転送します")
+                            // ★修正: Suspend関数なので scope.launch で囲む！
+                            scope.launch {
+                                tabFocusRequesters[selectedTabIndex].safeRequestFocusWithRetry("TopNavToTab")
+                            }
+                        }
+                    }
+                    .focusable()
+            )
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -344,11 +381,6 @@ fun ReserveListScreen(
                         },
                         modifier = Modifier
                             .focusRequester(tabFocusRequesters[index])
-                            .then(
-                                if (index == selectedTabIndex && contentFirstItemRequester != null) {
-                                    Modifier.focusRequester(contentFirstItemRequester)
-                                } else Modifier
-                            )
                             .focusProperties {
                                 down = listFocusRequester
                                 up = topNavFocusRequester ?: FocusRequester.Default
@@ -410,7 +442,6 @@ fun ReserveListScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .focusRequester(listFocusRequester)
-                                    .focusRestorer()
                                     .focusProperties { up = tabFocusRequesters[0] }
                             ) {
                                 items(reserves, key = { "all_res_${it.id}" }) { program ->
@@ -468,7 +499,6 @@ fun ReserveListScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .focusRequester(listFocusRequester)
-                                    .focusRestorer()
                                     .focusProperties { up = tabFocusRequesters[1] }
                             ) {
                                 items(normalReserves, key = { "norm_${it.id}" }) { program ->
@@ -526,7 +556,6 @@ fun ReserveListScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .focusRequester(listFocusRequester)
-                                    .focusRestorer()
                                     .focusProperties { up = tabFocusRequesters[2] }
                             ) {
                                 items(conditions, key = { "cond_${it.id}" }) { condition ->
@@ -588,7 +617,6 @@ private fun EmptyMessage(
         modifier = Modifier
             .fillMaxSize()
             .focusRequester(listFocusRequester)
-            .focusRestorer()
             .focusProperties {
                 up = targetTabRequester
                 left = FocusRequester.Cancel

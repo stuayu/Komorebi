@@ -25,6 +25,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +38,7 @@ import com.beeregg2001.komorebi.common.AppStrings
 import com.beeregg2001.komorebi.data.mapper.ReserveMapper
 import com.beeregg2001.komorebi.data.model.ReserveRecordSettings
 import com.beeregg2001.komorebi.data.sync.SyncProgress
+import com.beeregg2001.komorebi.ui.components.AiConciergePanel
 import com.beeregg2001.komorebi.ui.components.GlobalToast
 import com.beeregg2001.komorebi.ui.epg.ProgramDetailMode
 import com.beeregg2001.komorebi.ui.epg.ProgramDetailScreen
@@ -128,6 +130,8 @@ fun MainRootScreen(
     val startupChannelSetting by settingsViewModel.startupChannel.collectAsState()
     val updateState by homeViewModel.updateState.collectAsState()
 
+    var isLongPressHandled by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         if (!state.hasAppliedStartupTab) {
             val tab = settingsViewModel.getStartupTabOnce()
@@ -158,7 +162,7 @@ fun MainRootScreen(
                     }
 
                     state.selectedChannel = targetChannel
-                    state.isBaseballMode = false // ★起動時は通常モード
+                    state.isBaseballMode = false
                     state.lastSelectedChannelId = targetChannel.id
                     state.lastSelectedProgramId = null
                     homeViewModel.saveLastChannel(targetChannel)
@@ -199,6 +203,13 @@ fun MainRootScreen(
         if (!state.canProcessBackPress()) return@BackHandler
 
         when {
+            state.isAiConciergeOpen -> {
+                state.isAiConciergeOpen = false
+                state.isReturningFromPlayer = true
+                // ★修正: 番組表用の復元トリガーを確実に引く！
+                epgViewModel.triggerRestore()
+            }
+
             state.selectedConditionReserveItem != null -> state.selectedConditionReserveItem = null
             state.editingNewProgram != null -> state.editingNewProgram = null
             state.editingReserveItem != null -> state.editingReserveItem = null
@@ -281,6 +292,28 @@ fun MainRootScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .onPreviewKeyEvent { event ->
+                    val isCenterKey =
+                        event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter
+                    if (isCenterKey) {
+                        if (event.type == KeyEventType.KeyDown) {
+                            if (event.nativeKeyEvent.isLongPress) {
+                                if (!state.isAiConciergeOpen) {
+                                    state.isAiConciergeOpen = true
+                                }
+                                isLongPressHandled = true
+                                return@onPreviewKeyEvent true
+                            }
+                            if (isLongPressHandled) return@onPreviewKeyEvent true
+                        } else if (event.type == KeyEventType.KeyUp) {
+                            if (isLongPressHandled) {
+                                isLongPressHandled = false
+                                return@onPreviewKeyEvent true
+                            }
+                        }
+                    }
+                    false
+                }
                 .background(colors.background)
                 .background(backgroundBrush)
         ) {
@@ -304,7 +337,7 @@ fun MainRootScreen(
                                 mirakurunIp = mirakurunIp, mirakurunPort = mirakurunPort,
                                 konomiIp = konomiIp, konomiPort = konomiPort,
                                 initialQuality = defaultLiveQuality,
-                                isBaseballMode = state.isBaseballMode, // ★追加: プロ野球モードを渡す
+                                isBaseballMode = state.isBaseballMode,
                                 isMiniListOpen = state.isPlayerMiniListOpen,
                                 onMiniListToggle = { state.isPlayerMiniListOpen = it },
                                 showOverlay = state.playerShowOverlay,
@@ -495,7 +528,6 @@ fun MainRootScreen(
                                 onConditionClick = { condition ->
                                     state.editingCondition = condition
                                 },
-                                // ★修正: ここに状態を全て追加し、ダイアログ表示中のフォーカス強奪を防ぎます
                                 isReserveOverlayOpen = state.selectedReserve != null || state.editingCondition != null,
                                 epgSelectedProgram = state.epgSelectedProgram,
                                 onEpgProgramSelected = { state.epgSelectedProgram = it },
@@ -820,14 +852,23 @@ fun MainRootScreen(
                 }
             }
             GlobalToast(message = state.toastMessage)
+
+            AiConciergePanel(
+                isOpen = state.isAiConciergeOpen,
+                onClose = {
+                    state.isAiConciergeOpen = false
+                    state.isReturningFromPlayer = true
+                    // ★追加: 番組表用の復元トリガーを確実に引く！
+                    epgViewModel.triggerRestore()
+                }
+            )
         }
     }
 }
 
 // -------------------------------------------------------------
-// 以下のサブコンポーネントは元のコードと完全に同一です
+// サブコンポーネント (RobustUpdateDialog等) は省略なしで同じままです
 // -------------------------------------------------------------
-
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun RobustUpdateDialog(

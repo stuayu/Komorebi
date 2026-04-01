@@ -31,6 +31,9 @@ class MainRootState {
     var isSeriesListOpen by mutableStateOf(false)
     var toastMessage by mutableStateOf<String?>(null)
 
+    // 🌟 AIコンシェルジュの開閉フラグを追加
+    var isAiConciergeOpen by mutableStateOf(false)
+
     // プレイヤー状態
     var isPlayerMiniListOpen by mutableStateOf(false)
     var playerShowOverlay by mutableStateOf(true)
@@ -46,10 +49,10 @@ class MainRootState {
     var lastSelectedProgramId by mutableStateOf<String?>(null)
     var isReturningFromPlayer by mutableStateOf(false)
 
-    // ★追加: プロ野球特化モードのフラグ
+    // プロ野球特化モードのフラグ
     var isBaseballMode by mutableStateOf(false)
 
-    // ★追加: 再生から戻った際にフォーカスすべき録画番組のID
+    // 再生から戻った際にフォーカスすべき録画番組のID
     var lastPlayedRecordingId by mutableStateOf<Int?>(null)
 
     // システム状態
@@ -59,7 +62,7 @@ class MainRootState {
     var showConnectionErrorDialog by mutableStateOf(false)
     var hasAppliedStartupTab by mutableStateOf(false)
 
-    // ★追加: 起動時チャンネルの適用フラグ
+    // 起動時チャンネルの適用フラグ
     var hasAppliedStartupChannel by mutableStateOf(false)
 
     var editingCondition by mutableStateOf<ReservationCondition?>(null)

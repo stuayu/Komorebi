@@ -166,6 +166,11 @@ fun HomeLauncherScreen(
                 val itemId = homeViewModel.lastClickedItemId
                 if (safeTabIndex == 0 && section != null && itemId != null) {
                     ticketManager.issueForHomeRestore(section, itemId)
+                } else if (safeTabIndex == 3 || safeTabIndex == 4) {
+                    // ★修正: 永遠にロックされるのを防ぐため、番組表(3)の場合はここで確実にチケット（フラグ）を切る！
+                    if (safeTabIndex == 3) {
+                        onReturnFocusConsumed()
+                    }
                 } else {
                     ticketManager.issue(HomeFocusTicket.TAB_BAR)
                 }
@@ -338,10 +343,7 @@ fun HomeLauncherScreen(
                                             if (safeTabIndex == index && ui.isCurrentTabContentReady) ui.contentFirstItemRequesters[index] else FocusRequester.Default
                                         canFocus = !(safeTabIndex == 3 && ui.isEpgJumping)
 
-                                        // 🌟 タブから「上」へのフォーカス移動をブロック
                                         up = FocusRequester.Cancel
-
-                                        // 🌟 一番左のタブから「左」へのフォーカス移動をブロック
                                         if (index == 0) {
                                             left = FocusRequester.Cancel
                                         }
@@ -363,12 +365,9 @@ fun HomeLauncherScreen(
                         modifier = Modifier
                             .focusRequester(ui.settingsFocusRequester)
                             .focusProperties {
-                                // ★ 修正: 未初期化エラーを防ぐため、「現在実際に表示されている一番右のタブ」を確実に戻り先に指定
                                 left = ui.tabFocusRequesters[tabs.lastIndex]
-
                                 canFocus = !(safeTabIndex == 3 && ui.isEpgJumping)
 
-                                // 🌟 設定ボタンから「上」と「右」へのフォーカス移動をブロック
                                 up = FocusRequester.Cancel
                                 right = FocusRequester.Cancel
                             },
@@ -539,7 +538,9 @@ fun HomeLauncherScreen(
                                 contentFirstItemRequester = ui.contentFirstItemRequesters[4],
                                 topNavFocusRequester = ui.tabFocusRequesters[4],
                                 groupedChannels = groupedChannels,
-                                isReserveOverlayOpen = isReserveOverlayOpen
+                                isReserveOverlayOpen = isReserveOverlayOpen,
+                                isReturningFromPlayer = isReturningFromPlayer && safeTabIndex == 4,
+                                onReturnFocusConsumed = onReturnFocusConsumed
                             )
                             LaunchedEffect(Unit) {
                                 delay(500); onUiReady(); ui.isCurrentTabContentReady = true
