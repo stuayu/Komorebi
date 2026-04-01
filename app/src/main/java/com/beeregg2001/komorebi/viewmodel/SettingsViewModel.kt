@@ -1,5 +1,6 @@
 package com.beeregg2001.komorebi.viewmodel
 
+import androidx.annotation.Keep
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.beeregg2001.komorebi.data.SettingsRepository
@@ -15,7 +16,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// バッチ設定用のデータモデル
+// ★最適化(R8対策): このデータクラスは proguard-rules.pro の対象外パッケージ(viewmodel)にあるため、
+// リリースビルド時にGsonのパースエラーでクラッシュするのを防ぐために @Keep を追加します。
+@Keep
 data class PostRecordingBatch(
     val name: String,
     val path: String
@@ -80,6 +83,7 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
     val labShobocalIntegration: StateFlow<String> = settingsRepository.labShobocalIntegration
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
+
     // ★追加: 隠しスイッチの公開
     val labAllowMirakurunDual: StateFlow<String> = settingsRepository.labAllowMirakurunDual
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
@@ -95,6 +99,7 @@ class SettingsViewModel @Inject constructor(
     fun updateStartupChannel(value: String) = viewModelScope.launch {
         settingsRepository.saveString(SettingsRepository.STARTUP_CHANNEL, value)
     }
+
     val postRecordingBatchList: StateFlow<List<PostRecordingBatch>> =
         settingsRepository.postRecordingBatchList
             .map { json ->

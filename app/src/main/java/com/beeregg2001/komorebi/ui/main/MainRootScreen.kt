@@ -57,6 +57,8 @@ import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import com.beeregg2001.komorebi.ui.theme.getSeasonalBackgroundBrush
 import com.beeregg2001.komorebi.util.UpdateState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -116,7 +118,18 @@ fun MainRootScreen(
 
     val conditions by reserveViewModel.conditions.collectAsState()
     val reserves by reserveViewModel.reserves.collectAsState()
-    val syncProgress by recordViewModel.syncProgress.collectAsState()
+
+    // ★最適化: syncProgress 全体を監視するのではなく、画面の状態切り替えに必要な
+    // 「初回同期中かどうか」と「エラーがあるか」の Boolean だけを監視して、不要な再描画を防ぐ
+    val isSyncingInitial by remember(recordViewModel) {
+        recordViewModel.syncProgress.map { it.isSyncing && it.isInitialBuild }
+            .distinctUntilChanged()
+    }.collectAsState(initial = false)
+
+    val hasSyncError by remember(recordViewModel) {
+        recordViewModel.syncProgress.map { it.error != null }.distinctUntilChanged()
+    }.collectAsState(initial = false)
+
 
     val isEpgReady by epgViewModel.isInitialLoadComplete.collectAsState()
 
@@ -206,7 +219,6 @@ fun MainRootScreen(
             state.isAiConciergeOpen -> {
                 state.isAiConciergeOpen = false
                 state.isReturningFromPlayer = true
-                // ★修正: 番組表用の復元トリガーを確実に引く！
                 epgViewModel.triggerRestore()
             }
 
@@ -325,8 +337,9 @@ fun MainRootScreen(
                 )
             }
 
+            // ★最適化: isSyncingInitial を使って再描画を抑制
             val showMainContent =
-                isSystemReady && isSettingsInitialized && !state.showConnectionErrorDialog && !(syncProgress.isSyncing && syncProgress.isInitialBuild)
+                isSystemReady && isSettingsInitialized && !state.showConnectionErrorDialog && !isSyncingInitial
 
             if (showMainContent) {
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -566,18 +579,22 @@ fun MainRootScreen(
                         }
                     }
 
-                    if (state.selectedChannel == null && state.selectedProgram == null && !syncProgress.isInitialBuild) {
+                    if (state.selectedChannel == null && state.selectedProgram == null && !isSyncingInitial) {
+                        // ★最適化: ViewModelを丸ごと渡して、コンポーネント内部で状態を監視させる
                         SyncProgressIndicator(
-                            syncProgress = syncProgress,
+                            recordViewModel = recordViewModel,
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .padding(end = 40.dp, bottom = 40.dp)
                         )
                     }
 
-                    if (syncProgress.error != null) {
+                    if (hasSyncError) {
+                        // エラーのメッセージだけは外から取得して渡す（エラーダイアログの表示時のみ再描画）
+                        val errorMessage =
+                            recordViewModel.syncProgress.value.error ?: "不明なエラー"
                         SyncErrorDialog(
-                            errorMessage = syncProgress.error!!,
+                            errorMessage = errorMessage,
                             onRetry = {
                                 recordViewModel.clearSyncError()
                                 recordViewModel.triggerSmartSync()
@@ -593,11 +610,12 @@ fun MainRootScreen(
                 enter = fadeIn(),
                 exit = fadeOut(tween(250))
             ) {
-                if (syncProgress.isSyncing && syncProgress.isInitialBuild) {
+                if (isSyncingInitial) {
+                    val currentSync by recordViewModel.syncProgress.collectAsState()
                     val pRatio =
-                        if (syncProgress.total > 0) syncProgress.current.toFloat() / syncProgress.total.toFloat() else 0f
+                        if (currentSync.total > 0) currentSync.current.toFloat() / currentSync.total.toFloat() else 0f
                     LoadingScreen(
-                        message = syncProgress.progressText,
+                        message = currentSync.progressText,
                         progressRatio = pRatio
                     )
                 } else {
@@ -858,7 +876,6 @@ fun MainRootScreen(
                 onClose = {
                     state.isAiConciergeOpen = false
                     state.isReturningFromPlayer = true
-                    // ★追加: 番組表用の復元トリガーを確実に引く！
                     epgViewModel.triggerRestore()
                 }
             )
@@ -867,7 +884,7 @@ fun MainRootScreen(
 }
 
 // -------------------------------------------------------------
-// サブコンポーネント (RobustUpdateDialog等) は省略なしで同じままです
+// サブコンポーネント (RobustUpdateDialog等)
 // -------------------------------------------------------------
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -978,8 +995,10 @@ fun RobustUpdateDialog(
     }
 }
 
+// ★最適化: ViewModelを受け取って内部で監視するように引数を変更
 @Composable
-fun SyncProgressIndicator(syncProgress: SyncProgress, modifier: Modifier = Modifier) {
+fun SyncProgressIndicator(recordViewModel: RecordViewModel, modifier: Modifier = Modifier) {
+    val syncProgress by recordViewModel.syncProgress.collectAsState()
     val colors = KomorebiTheme.colors
     val progress =
         if (syncProgress.total > 0) syncProgress.current.toFloat() / syncProgress.total.toFloat() else 0f

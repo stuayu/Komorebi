@@ -82,7 +82,9 @@ class ChannelViewModel @Inject constructor(
             }.filterValues { it.isNotEmpty() }
 
             if (filtered.isEmpty()) grouped else filtered
-        }.stateIn(
+        }
+            .flowOn(Dispatchers.Default) // ★最適化: Map内の重い文字列判定をバックグラウンドスレッドで実行
+            .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyMap()

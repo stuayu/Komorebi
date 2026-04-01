@@ -135,6 +135,8 @@ class HomeViewModel @Inject constructor(
         _sharedEpgData.value = data
     }
 
+    // HomeViewModel.kt の fetchAllTypeGenrePickup() 内部を以下のように修正
+
     private fun fetchAllTypeGenrePickup() {
         viewModelScope.launch {
             val genre = pickupGenreLabel.value
@@ -156,31 +158,32 @@ class HomeViewModel @Inject constructor(
                 }
             }.awaitAll().flatten()
 
-            cachedBaseballPrograms = allPrograms.flatMap { wrapper ->
-                wrapper.programs.map { it to wrapper.channel }
-            }.filter { (prog, _) ->
-                val isSports = prog.genres?.any { it.major.contains("スポーツ") } == true
-                if (!isSports) return@filter false
+            // ★最適化: 膨大なリストのループ処理をバックグラウンドスレッドに逃がしてUIのフリーズを防ぐ
+            cachedBaseballPrograms = withContext(Dispatchers.Default) {
+                allPrograms.flatMap { wrapper ->
+                    wrapper.programs.map { it to wrapper.channel }
+                }.filter { (prog, _) ->
+                    val isSports = prog.genres?.any { it.major.contains("スポーツ") } == true
+                    if (!isSports) return@filter false
 
-                val isBaseballGenre =
-                    prog.genres?.any { it.middle?.contains("野球") == true } == true || prog.title.contains(
-                        "プロ野球"
+                    val isBaseballGenre =
+                        prog.genres?.any { it.middle?.contains("野球") == true } == true || prog.title.contains("プロ野球")
+                    if (!isBaseballGenre) return@filter false
+
+                    val excludeKeywords = listOf(
+                        "特集", "ヴィンテージ", "ハイライト", "ダイジェスト", "ニュース",
+                        "名勝負", "傑作選", "セレクション", "トラリンク", "ガンガン！",
+                        "伝説", "回顧", "すぽると", "熱闘", "プロ野球ニュース"
                     )
-                if (!isBaseballGenre) return@filter false
+                    if (excludeKeywords.any { prog.title.contains(it) }) return@filter false
 
-                val excludeKeywords = listOf(
-                    "特集", "ヴィンテージ", "ハイライト", "ダイジェスト", "ニュース",
-                    "名勝負", "傑作選", "セレクション", "トラリンク", "ガンガン！",
-                    "伝説", "回顧", "すぽると", "熱闘", "プロ野球ニュース"
-                )
-                if (excludeKeywords.any { prog.title.contains(it) }) return@filter false
-
-                val matchKeywords = listOf("中継", "対", "×", "vs", "戦", "生放送", "LIVE")
-                matchKeywords.any { keyword ->
-                    prog.title.contains(keyword, ignoreCase = true) || prog.description.contains(
-                        keyword,
-                        ignoreCase = true
-                    )
+                    val matchKeywords = listOf("中継", "対", "×", "vs", "戦", "生放送", "LIVE")
+                    matchKeywords.any { keyword ->
+                        prog.title.contains(keyword, ignoreCase = true) || prog.description.contains(
+                            keyword,
+                            ignoreCase = true
+                        )
+                    }
                 }
             }
 

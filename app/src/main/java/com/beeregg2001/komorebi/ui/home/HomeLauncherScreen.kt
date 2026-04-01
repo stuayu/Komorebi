@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.*
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -48,7 +49,9 @@ fun DigitalClock(modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) {
         while (true) {
             currentTime = LocalTime.now()
-            delay(1000)
+            // ★最適化: 秒数を表示しないので、毎秒更新(1000)から1分更新(60000)に変更。
+            // これにより、ホーム画面で1秒に1回発生していた不要な再描画(マイクロスタッター)が消滅します！
+            delay(60000)
         }
     }
     Text(
@@ -167,7 +170,6 @@ fun HomeLauncherScreen(
                 if (safeTabIndex == 0 && section != null && itemId != null) {
                     ticketManager.issueForHomeRestore(section, itemId)
                 } else if (safeTabIndex == 3 || safeTabIndex == 4) {
-                    // ★修正: 永遠にロックされるのを防ぐため、番組表(3)の場合はここで確実にチケット（フラグ）を切る！
                     if (safeTabIndex == 3) {
                         onReturnFocusConsumed()
                     }
@@ -260,10 +262,11 @@ fun HomeLauncherScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // ★最適化: .alpha() ではなく .graphicsLayer { alpha = 0f } を使ってレイアウト再計算を防ぐ
         Box(
             modifier = Modifier
                 .size(1.dp)
-                .alpha(0f)
+                .graphicsLayer { alpha = 0f }
                 .focusRequester(ui.safeHouseRequester)
                 .focusable()
         )
@@ -399,10 +402,7 @@ fun HomeLauncherScreen(
                             pickupTimeSlot = ui.genrePickupTimeSlot,
                             groupedChannels = groupedChannels,
                             onChannelClick = {
-                                if (it != null) onChannelClick(
-                                    it,
-                                    false
-                                )
+                                if (it != null) onChannelClick(it, false)
                             },
                             onHistoryClick = { historyItem ->
                                 val programId = historyItem.program.id.toIntOrNull()
