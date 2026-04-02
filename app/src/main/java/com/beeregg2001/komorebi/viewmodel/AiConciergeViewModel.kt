@@ -47,7 +47,7 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
     private val _pendingAction = MutableSharedFlow<AiConciergeAction>()
     val pendingAction = _pendingAction.asSharedFlow()
 
-    private val apiKey = "AIzaSyDlQLgC3Fmhu0HU5jK5UcVmdVxjdXoZFss"
+    private val apiKey = ""
 
     private val generativeModel = GenerativeModel(
         modelName = "gemini-3.1-flash-lite-preview",
