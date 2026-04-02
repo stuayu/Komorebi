@@ -2,8 +2,15 @@
 
 package com.beeregg2001.komorebi.ui.main
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
+import android.speech.RecognizerIntent
+import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -24,20 +31,24 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.*
 import com.beeregg2001.komorebi.common.AppStrings
 import com.beeregg2001.komorebi.data.mapper.ReserveMapper
 import com.beeregg2001.komorebi.data.model.ReserveRecordSettings
-import com.beeregg2001.komorebi.data.sync.SyncProgress
 import com.beeregg2001.komorebi.ui.components.AiConciergePanel
 import com.beeregg2001.komorebi.ui.components.GlobalToast
 import com.beeregg2001.komorebi.ui.epg.ProgramDetailMode
@@ -50,6 +61,7 @@ import com.beeregg2001.komorebi.ui.video.RecordListScreen
 import com.beeregg2001.komorebi.ui.video.player.VideoPlayerScreen
 import com.beeregg2001.komorebi.ui.reserve.ReserveSettingsDialog
 import com.beeregg2001.komorebi.ui.reserve.ConditionEditDialog
+import com.beeregg2001.komorebi.util.AudioRecorderHelper
 import com.beeregg2001.komorebi.viewmodel.*
 import com.beeregg2001.komorebi.common.safeRequestFocus
 import com.beeregg2001.komorebi.ui.theme.AppTheme
@@ -61,9 +73,32 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.LocalTime
-import java.time.OffsetDateTime
 
 private const val TAG = "MainRootScreen"
+
+enum class AiFocusTicket { NONE, PANEL_DEFAULT }
+
+@Stable
+class AiFocusTicketManager {
+    var currentTicket by mutableStateOf(AiFocusTicket.NONE)
+        private set
+    var issueTime by mutableLongStateOf(0L)
+        private set
+
+    fun issue(ticket: AiFocusTicket) {
+        currentTicket = ticket
+        issueTime = System.currentTimeMillis()
+    }
+
+    fun consume(ticket: AiFocusTicket) {
+        if (currentTicket == ticket) {
+            currentTicket = AiFocusTicket.NONE
+        }
+    }
+}
+
+@Composable
+fun rememberAiFocusTicketManager() = remember { AiFocusTicketManager() }
 
 @UnstableApi
 @RequiresApi(Build.VERSION_CODES.O)
@@ -75,11 +110,86 @@ fun MainRootScreen(
     settingsViewModel: SettingsViewModel = hiltViewModel(),
     recordViewModel: RecordViewModel,
     reserveViewModel: ReserveViewModel = hiltViewModel(),
+    aiConciergeViewModel: AiConciergeViewModel = hiltViewModel(),
     onExitApp: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = rememberMainRootState()
+
+    var showAiKeyboardInput by remember { mutableStateOf(false) }
+    val aiTicketManager = rememberAiFocusTicketManager()
+
+    val isSpeechSupported = remember {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        context.packageManager.resolveActivity(intent, 0) != null
+    }
+
+    val audioRecorderHelper = remember { AudioRecorderHelper(context) }
+    var isRecordingVoice by remember { mutableStateOf(false) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (!isGranted) {
+            state.toastMessage = "マイク権限が必要です。文字入力をご利用ください。"
+        }
+    }
+
+    val stopRecordingAndSend = {
+        if (isRecordingVoice) {
+            val file = audioRecorderHelper.stopRecording()
+            isRecordingVoice = false
+
+            if (file != null && file.exists() && file.length() > 0) {
+                Log.i("AI_Concierge", "🎙️ 録音完了、Geminiに送信します (${file.length()} bytes)")
+                val audioBytes = file.readBytes()
+
+                aiConciergeViewModel.sendAudioWithContext(
+                    audioBytes = audioBytes,
+                    liveChannels = channelViewModel.groupedChannels.value,
+                    recentRecordings = recordViewModel.recentRecordings.value,
+                    groupedSeries = recordViewModel.groupedSeries.value,
+                    activeReserves = reserveViewModel.reserves.value
+                )
+            } else {
+                state.toastMessage = "音声が短すぎるか、録音できませんでした"
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        aiConciergeViewModel.pendingAction.collect { action ->
+            when (action) {
+                is AiConciergeAction.PlayLive -> {
+                    val target = channelViewModel.groupedChannels.value.values.flatten()
+                        .find { it.id == action.channelId }
+                    if (target != null) {
+                        state.isAiConciergeOpen = false
+                        state.selectedChannel = target
+                        state.lastSelectedChannelId = target.id
+                        homeViewModel.saveLastChannel(target)
+                        state.isReturningFromPlayer = false
+                        Log.i("AI_Concierge", "🚀 AIによりライブ再生を開始: ${target.name}")
+                    }
+                }
+
+                is AiConciergeAction.PlayRecorded -> {
+                    val target =
+                        recordViewModel.recentRecordings.value.find { it.id == action.videoId }
+                    if (target != null) {
+                        state.isAiConciergeOpen = false
+                        state.initialPlaybackPositionMs = 0L
+                        state.selectedProgram = target
+                        state.lastSelectedProgramId = target.id.toString()
+                        state.showPlayerControls = true
+                        state.isReturningFromPlayer = false
+                        Log.i("AI_Concierge", "🚀 AIにより録画再生を開始: ${target.title}")
+                    }
+                }
+            }
+        }
+    }
 
     val themeName by settingsViewModel.appTheme.collectAsState(initial = "MONOTONE")
     val currentTheme = remember(themeName) {
@@ -119,8 +229,6 @@ fun MainRootScreen(
     val conditions by reserveViewModel.conditions.collectAsState()
     val reserves by reserveViewModel.reserves.collectAsState()
 
-    // ★最適化: syncProgress 全体を監視するのではなく、画面の状態切り替えに必要な
-    // 「初回同期中かどうか」と「エラーがあるか」の Boolean だけを監視して、不要な再描画を防ぐ
     val isSyncingInitial by remember(recordViewModel) {
         recordViewModel.syncProgress.map { it.isSyncing && it.isInitialBuild }
             .distinctUntilChanged()
@@ -129,7 +237,6 @@ fun MainRootScreen(
     val hasSyncError by remember(recordViewModel) {
         recordViewModel.syncProgress.map { it.error != null }.distinctUntilChanged()
     }.collectAsState(initial = false)
-
 
     val isEpgReady by epgViewModel.isInitialLoadComplete.collectAsState()
 
@@ -220,6 +327,7 @@ fun MainRootScreen(
                 state.isAiConciergeOpen = false
                 state.isReturningFromPlayer = true
                 epgViewModel.triggerRestore()
+                aiConciergeViewModel.resetState()
             }
 
             state.selectedConditionReserveItem != null -> state.selectedConditionReserveItem = null
@@ -305,15 +413,20 @@ fun MainRootScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .onPreviewKeyEvent { event ->
+                    // ★ 修正: パネルが開いている時は、長押しイベントを親（ルート画面）で横取りせず、子（ボタン）に譲る！
+                    if (state.isAiConciergeOpen) return@onPreviewKeyEvent false
+
                     val isCenterKey =
                         event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter
                     if (isCenterKey) {
                         if (event.type == KeyEventType.KeyDown) {
-                            if (event.nativeKeyEvent.isLongPress) {
+                            // エミュレータ等のために、ルート画面のパネル起動も repeatCount > 0 を長押し判定に加える
+                            if ((event.nativeKeyEvent.isLongPress || event.nativeKeyEvent.repeatCount > 0) && !isLongPressHandled) {
+                                isLongPressHandled = true
                                 if (!state.isAiConciergeOpen) {
                                     state.isAiConciergeOpen = true
+                                    aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
                                 }
-                                isLongPressHandled = true
                                 return@onPreviewKeyEvent true
                             }
                             if (isLongPressHandled) return@onPreviewKeyEvent true
@@ -337,7 +450,6 @@ fun MainRootScreen(
                 )
             }
 
-            // ★最適化: isSyncingInitial を使って再描画を抑制
             val showMainContent =
                 isSystemReady && isSettingsInitialized && !state.showConnectionErrorDialog && !isSyncingInitial
 
@@ -580,7 +692,6 @@ fun MainRootScreen(
                     }
 
                     if (state.selectedChannel == null && state.selectedProgram == null && !isSyncingInitial) {
-                        // ★最適化: ViewModelを丸ごと渡して、コンポーネント内部で状態を監視させる
                         SyncProgressIndicator(
                             recordViewModel = recordViewModel,
                             modifier = Modifier
@@ -590,7 +701,6 @@ fun MainRootScreen(
                     }
 
                     if (hasSyncError) {
-                        // エラーのメッセージだけは外から取得して渡す（エラーダイアログの表示時のみ再描画）
                         val errorMessage =
                             recordViewModel.syncProgress.value.error ?: "不明なエラー"
                         SyncErrorDialog(
@@ -873,18 +983,156 @@ fun MainRootScreen(
 
             AiConciergePanel(
                 isOpen = state.isAiConciergeOpen,
+                chatHistory = aiConciergeViewModel.chatHistory.collectAsState().value,
+                isSpeechSupported = isSpeechSupported,
+                isRecording = isRecordingVoice,
+                ticketManager = aiTicketManager,
                 onClose = {
                     state.isAiConciergeOpen = false
                     state.isReturningFromPlayer = true
                     epgViewModel.triggerRestore()
-                }
+                    aiConciergeViewModel.resetState()
+                },
+                onMicLongPressStart = {
+                    if (ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        audioRecorderHelper.startRecording()
+                        isRecordingVoice = true
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onMicLongPressEnd = { stopRecordingAndSend() },
+                onKeyboardClick = { showAiKeyboardInput = true }
             )
+
+            if (showAiKeyboardInput) {
+                AiTextInputDialog(
+                    onSubmit = { text ->
+                        showAiKeyboardInput = false
+                        scope.launch {
+                            delay(300)
+                            aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
+                        }
+                        if (text.isNotBlank()) {
+                            aiConciergeViewModel.sendTextWithContext(
+                                userInput = text,
+                                liveChannels = channelViewModel.groupedChannels.value,
+                                recentRecordings = recordViewModel.recentRecordings.value,
+                                groupedSeries = recordViewModel.groupedSeries.value,
+                                activeReserves = reserveViewModel.reserves.value
+                            )
+                        }
+                    },
+                    onDismiss = {
+                        showAiKeyboardInput = false
+                        scope.launch {
+                            delay(300)
+                            aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+// =========================================================================
+// AIテキスト入力用ダイアログ
+// =========================================================================
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun AiTextInputDialog(
+    onSubmit: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    val colors = KomorebiTheme.colors
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        LaunchedEffect(Unit) {
+            delay(100)
+            runCatching { focusRequester.requestFocus() }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.85f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                colors = SurfaceDefaults.colors(containerColor = colors.surface),
+                modifier = Modifier.width(500.dp)
+            ) {
+                Column(modifier = Modifier.padding(32.dp)) {
+                    Text(
+                        text = "AIに質問・指示を入力",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester)
+                            .background(
+                                colors.textPrimary.copy(alpha = 0.1f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(16.dp),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = colors.textPrimary,
+                            fontSize = 18.sp
+                        ),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = {
+                            onSubmit(
+                                text
+                            )
+                        }),
+                        cursorBrush = Brush.verticalGradient(listOf(colors.accent, colors.accent))
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Button(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.colors(
+                                containerColor = colors.textPrimary.copy(alpha = 0.1f),
+                                contentColor = colors.textPrimary
+                            )
+                        ) { Text("キャンセル") }
+                        Button(
+                            onClick = { onSubmit(text) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.colors(
+                                containerColor = colors.accent,
+                                contentColor = if (colors.isDark) Color.Black else Color.White
+                            )
+                        ) { Text("送信") }
+                    }
+                }
+            }
         }
     }
 }
 
 // -------------------------------------------------------------
-// サブコンポーネント (RobustUpdateDialog等)
+// 以下、既存サブコンポーネント (RobustUpdateDialog等)
 // -------------------------------------------------------------
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -995,7 +1243,6 @@ fun RobustUpdateDialog(
     }
 }
 
-// ★最適化: ViewModelを受け取って内部で監視するように引数を変更
 @Composable
 fun SyncProgressIndicator(recordViewModel: RecordViewModel, modifier: Modifier = Modifier) {
     val syncProgress by recordViewModel.syncProgress.collectAsState()
