@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.util.Log
 import androidx.media3.common.util.UnstableApi
 import com.beeregg2001.komorebi.common.UrlBuilder
 import com.beeregg2001.komorebi.data.SettingsRepository
@@ -186,27 +187,121 @@ class EpgViewModel @Inject constructor(
      * KonomiTVのAPIを叩いて、未来の番組（番組表データ）からキーワード検索を実行します。
      * 結果は番組単体ではなく、チャンネル情報とロゴURLを結合したUiSearchResultItemのリストとしてUIに提供します。
      */
-    fun executeSearch(query: String) {
-        val trimmed = query.trim()
-        if (trimmed.isNotEmpty()) {
-            _activeSearchQuery.value = trimmed
+    // ==========================================
+    // ★ 修正: 日付・ジャンル・生放送(isLiveOnly)に対応した検索メソッド
+    // ==========================================
+    @OptIn(UnstableApi::class)
+    fun executeSearch(keyword: String, genre: String? = null, dateStr: String? = null, isLiveOnly: Boolean = false) {
+        viewModelScope.launch {
+            _isSearching.value = true
+            val displayQuery = if (keyword.isNotBlank()) keyword else (genre ?: "")
+            _searchQuery.value = displayQuery
+            _activeSearchQuery.value = displayQuery
 
-            // ★修正: ローカル保存機能を持つ関数を使用する
-            addSearchHistory(trimmed)
+            if (displayQuery.isNotBlank()) {
+                addSearchHistory(displayQuery)
+            }
 
-            viewModelScope.launch(Dispatchers.Default) {
-                _isSearching.value = true
-                val results = repository.searchFuturePrograms(trimmed)
-                val uiResults = results.map { item ->
+            try {
+                Log.i("EPG_Search", "🔍 検索開始 [UI] - Query: '$displayQuery', Genre: '$genre', Date: '$dateStr', isLive: $isLiveOnly")
+                val rawResults = repository.searchFuturePrograms(displayQuery)
+
+                val targetTvDate = try {
+                    dateStr?.takeIf { it.isNotBlank() }?.let {
+                        java.time.LocalDate.parse(it.replace("/", "-"))
+                    }
+                } catch (e: Exception) { null }
+
+                val filtered = rawResults.filter { item ->
+                    val matchGenre = genre.isNullOrBlank() ||
+                            (item.program.genres?.any { it.major.contains(genre) || it.middle.contains(genre) } == true) ||
+                            item.program.title.contains(genre)
+
+                    val matchDate = if (targetTvDate != null) {
+                        try {
+                            val tvDate = getTvDayStart(OffsetDateTime.parse(item.program.start_time)).toLocalDate()
+                            tvDate == targetTvDate
+                        } catch (e: Exception) { false }
+                    } else true
+
+                    // ★ 追加: 生放送フィルター
+                    val matchLive = if (isLiveOnly) {
+                        val title = item.program.title ?: ""
+                        val desc = item.program.description ?: ""
+                        val detail = item.program.detail?.values?.joinToString(" ") ?: ""
+                        title.contains("[生]") || title.contains("【生】") || title.contains("生中継") || title.contains("生放送") || title.contains("LIVE", ignoreCase = true) ||
+                                desc.contains("生中継") || desc.contains("生放送") || detail.contains("生中継") || detail.contains("生放送")
+                    } else true
+
+                    matchGenre && matchDate && matchLive
+                }.map { item ->
                     UiSearchResultItem(
                         program = item.program,
                         channel = item.channel,
                         logoUrl = getLogoUrl(item.channel)
                     )
                 }
-                _searchResults.value = uiResults
+
+                Log.i("EPG_Search", "🎯 絞り込み後の件数: ${filtered.size}件")
+                _searchResults.value = filtered
+            } catch (e: Exception) {
+                Log.e("EPG_Search", "Search Error", e)
+                _searchResults.value = emptyList()
+            } finally {
                 _isSearching.value = false
             }
+        }
+    }
+
+    // ==========================================
+    // ★ 修正: 裏側サイレント検索
+    // ==========================================
+    @OptIn(UnstableApi::class)
+    suspend fun searchSilently(keyword: String, genre: String? = null, dateStr: String? = null, isLiveOnly: Boolean = false): List<UiSearchResultItem> {
+        val query = if (keyword.isNotBlank()) keyword else (genre ?: "")
+        if (query.isEmpty() && dateStr.isNullOrBlank()) return emptyList()
+
+        return try {
+            Log.i("EPG_Search", "🕵️‍♂️ 裏側検索開始 [Silent] - Query: '$query', Genre: '$genre', Date: '$dateStr', isLive: $isLiveOnly")
+            val rawResults = repository.searchFuturePrograms(query)
+
+            val targetTvDate = try {
+                dateStr?.takeIf { it.isNotBlank() }?.let {
+                    java.time.LocalDate.parse(it.replace("/", "-"))
+                }
+            } catch (e: Exception) { null }
+
+            rawResults.filter { item ->
+                val matchGenre = genre.isNullOrBlank() ||
+                        (item.program.genres?.any { it.major.contains(genre) || it.middle.contains(genre) } == true) ||
+                        item.program.title.contains(genre)
+
+                val matchDate = if (targetTvDate != null) {
+                    try {
+                        val tvDate = getTvDayStart(OffsetDateTime.parse(item.program.start_time)).toLocalDate()
+                        tvDate == targetTvDate
+                    } catch (e: Exception) { false }
+                } else true
+
+                val matchLive = if (isLiveOnly) {
+                    val title = item.program.title ?: ""
+                    val desc = item.program.description ?: ""
+                    val detail = item.program.detail?.values?.joinToString(" ") ?: ""
+                    title.contains("[生]") || title.contains("【生】") || title.contains("生中継") || title.contains("生放送") || title.contains("LIVE", ignoreCase = true) ||
+                            desc.contains("生中継") || desc.contains("生放送") || detail.contains("生中継") || detail.contains("生放送")
+                } else true
+
+                matchGenre && matchDate && matchLive
+            }.map { item ->
+                UiSearchResultItem(
+                    program = item.program,
+                    channel = item.channel,
+                    logoUrl = getLogoUrl(item.channel)
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("EPG_Search", "Silent Search Error", e)
+            emptyList()
         }
     }
 
@@ -218,7 +313,6 @@ class EpgViewModel @Inject constructor(
 
     /**
      * EPGデータ（地デジ、BSなど全波）をバックグラウンドで先読みしてキャッシュに格納します。
-     * アプリの起動直後や待機時間に実行しておくことで、番組表を開いた瞬間にデータが表示されるようになります。
      */
     fun preloadEpgDataForSearch(availableTypes: List<String>) {
         val now = OffsetDateTime.now()
@@ -236,9 +330,6 @@ class EpgViewModel @Inject constructor(
         }
     }
 
-    /**
-     * IPアドレスなどの設定情報が読み込まれるのを監視し、準備ができたら番組表データの取得を開始します。
-     */
     private fun loadInitialData() {
         viewModelScope.launch {
             combine(
@@ -259,8 +350,11 @@ class EpgViewModel @Inject constructor(
                 if ((isMirakurunReady || isKonomiReady) && !hasInitialFetched) {
                     hasInitialFetched = true
                     viewModelScope.launch { refreshEpgData(type) }
+
+                    // ★追加: 検索・AI予約のために、他の放送波（BS・CS・SKY等）も裏側でメモリにキャッシュしておく！
+                    preloadEpgDataForSearch(listOf("GR", "BS", "CS", "SKY","BS4K"))
+
                 } else if ((isMirakurunReady || isKonomiReady) && hasInitialFetched) {
-                    // 設定情報（または放送波タブ）が変更された場合、再取得を行う
                     refreshEpgData(type)
                 }
             }.collectLatest { }
@@ -271,10 +365,6 @@ class EpgViewModel @Inject constructor(
         refreshEpgData()
     }
 
-    /**
-     * KonomiTVサーバーから1週間分の番組表データを取得し、メモリ（fullEpgData）に保持します。
-     * 取得完了後、UIに渡すために1日分だけのデータをスライス（sliceAndEmitEpgData）します。
-     */
     fun refreshEpgData(channelType: String? = null) {
         epgJob?.cancel()
         epgJob = viewModelScope.launch {
@@ -290,10 +380,7 @@ class EpgViewModel @Inject constructor(
 
             repository.getEpgDataStream(start, end, typeToFetch).collect { result ->
                 result.onSuccess { data ->
-                    // 1週間分の巨大なデータをメモリに保持
                     fullEpgData = data
-
-                    // スクロール時にUIスレッドをブロックしないよう、ロゴURLの解決を事前に計算しておく
                     fullLogoUrls =
                         withContext(Dispatchers.Default) { data.map { getLogoUrl(it.channel) } }
 
@@ -311,44 +398,28 @@ class EpgViewModel @Inject constructor(
         }
     }
 
-    /**
-     * ユーザーが番組表上で別の日付・時間にジャンプした際に呼ばれます。
-     * 目標時間を更新し、それに合わせた1日分のデータスライスを作り直します。
-     */
     fun updateTargetTime(time: OffsetDateTime) {
         currentTargetTime = time
         sliceAndEmitEpgData()
     }
 
-    /**
-     * テレビ番組表特有の「1日の区切り（朝4時）」を計算します。
-     * 例: 10月2日の午前2時は「10月1日の深夜26時」として扱うため、ベースとなる日付は10月1日の朝4時になります。
-     */
     private fun getTvDayStart(time: OffsetDateTime): OffsetDateTime {
         val base = time.withHour(4).withMinute(0).withSecond(0).withNano(0)
         return if (time.hour < 4) base.minusDays(1) else base
     }
 
-    /**
-     * メモリ上に保持している数日分・数万件の全番組データ（fullEpgData）から、
-     * 「currentTargetTime（目標時間）が属するテレビ的1日（朝4時〜翌朝4時）」の分だけを抽出（スライス）し、
-     * UI描画用の EpgUiState.Success として発行します。
-     * これにより、Compose層での描画負荷を劇的に軽減しています。
-     */
     private fun sliceAndEmitEpgData() {
         if (fullEpgData.isEmpty()) return
-        viewModelScope.launch(Dispatchers.Default) { // 重いフィルタリング処理なのでDefaultディスパッチャを使用
+        viewModelScope.launch(Dispatchers.Default) {
 
             val tvDayStart = getTvDayStart(currentTargetTime)
             val tvDayEnd = tvDayStart.plusHours(24)
 
             val slicedData = fullEpgData.map { wrapper ->
-                // そのチャンネルに含まれる番組のうち、表示対象の24時間にかぶっているものだけを残す
                 val filteredPrograms = wrapper.programs.filter { prog ->
                     try {
                         val pStart = OffsetDateTime.parse(prog.start_time)
                         val pEnd = OffsetDateTime.parse(prog.end_time)
-                        // 番組の終了時間が対象枠の開始より後 かつ 番組の開始時間が対象枠の終了より前
                         pEnd.isAfter(tvDayStart) && pStart.isBefore(tvDayEnd)
                     } catch (e: Exception) {
                         false
@@ -357,7 +428,6 @@ class EpgViewModel @Inject constructor(
                 wrapper.copy(programs = filteredPrograms)
             }
 
-            // スライスした軽量なデータをUIレイヤーに送信
             uiState = EpgUiState.Success(
                 data = slicedData,
                 logoUrls = fullLogoUrls,
@@ -368,10 +438,6 @@ class EpgViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Mirakurunが設定されている場合はMirakurunから高品質なロゴを、
-     * そうでなければKonomiTVからロゴを取得するためのURLを生成します。
-     */
     @OptIn(UnstableApi::class)
     fun getLogoUrl(channel: EpgChannel): String {
         return if (mirakurunIp.isNotEmpty() && mirakurunPort.isNotEmpty()) {
@@ -390,18 +456,15 @@ class EpgViewModel @Inject constructor(
     }
 }
 
-/**
- * EPG画面の描画状態を表すシールドクラス。
- */
 sealed class EpgUiState {
     object Loading : EpgUiState()
 
     data class Success(
-        val data: List<EpgChannelWrapper>, // スライスされた1日分の番組データ
-        val logoUrls: List<String>,        // キャッシュ済みのロゴURLリスト
+        val data: List<EpgChannelWrapper>,
+        val logoUrls: List<String>,
         val mirakurunIp: String,
         val mirakurunPort: String,
-        val targetTime: OffsetDateTime     // UIがスクロールの基準とすべき目標時間
+        val targetTime: OffsetDateTime
     ) : EpgUiState()
 
     data class Error(val message: String) : EpgUiState()

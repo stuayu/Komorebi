@@ -3,6 +3,27 @@ package com.beeregg2001.komorebi.ui.main
 import androidx.compose.runtime.*
 import com.beeregg2001.komorebi.data.model.*
 
+enum class AiFocusTicket { NONE, PANEL_DEFAULT }
+
+@Stable
+class AiFocusTicketManager {
+    var currentTicket by mutableStateOf(AiFocusTicket.NONE)
+        private set
+    var issueTime by mutableLongStateOf(0L)
+        private set
+
+    fun issue(ticket: AiFocusTicket) {
+        currentTicket = ticket
+        issueTime = System.currentTimeMillis()
+    }
+
+    fun consume(ticket: AiFocusTicket) {
+        if (currentTicket == ticket) {
+            currentTicket = AiFocusTicket.NONE
+        }
+    }
+}
+
 /**
  * MainRootScreenのすべてのUI状態(変数)を管理するState Holderクラス
  */
@@ -31,8 +52,10 @@ class MainRootState {
     var isSeriesListOpen by mutableStateOf(false)
     var toastMessage by mutableStateOf<String?>(null)
 
-    // 🌟 AIコンシェルジュの開閉フラグを追加
+    // 🌟 AIコンシェルジュ関連のフラグ・マネージャー
     var isAiConciergeOpen by mutableStateOf(false)
+    var showAiKeyboardInput by mutableStateOf(false)
+    val aiTicketManager = AiFocusTicketManager()
 
     // プレイヤー状態
     var isPlayerMiniListOpen by mutableStateOf(false)

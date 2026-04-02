@@ -41,8 +41,9 @@ fun TopSubMenuUI(
     isCommentEnabled: Boolean,
     isRecording: Boolean,
     isSignalInfoVisible: Boolean,
-    isDualDisplayMode: Boolean, // 二画面モードフラグ
-    onDualDisplayToggle: () -> Unit, // 二画面トグル
+    isDualDisplayMode: Boolean,
+    onDualDisplayToggle: () -> Unit,
+    onSwapScreens: () -> Unit, // ★ 追加: 左右入れ替え用のコールバック
     onSignalInfoToggle: () -> Unit,
     onRecordToggle: () -> Unit,
     focusRequester: FocusRequester,
@@ -58,7 +59,6 @@ fun TopSubMenuUI(
     val qualityFocusRequester = remember { FocusRequester() }
     val mainQualityButtonRequester = remember { FocusRequester() }
 
-    // ★追加: 二画面モード時に1080pを除外した選択肢を生成
     val availableQualities = remember(isDualDisplayMode) {
         if (isDualDisplayMode) {
             StreamQuality.entries.filter { !it.name.contains("1080") && !it.label.contains("1080") }
@@ -67,7 +67,6 @@ fun TopSubMenuUI(
         }
     }
 
-    // ★追加: 二画面モード中に現在の設定が1080pだった場合、UI上の表示を720pに補正する
     val effectiveQuality = remember(currentQuality, isDualDisplayMode, availableQualities) {
         if (isDualDisplayMode && (currentQuality.name.contains("1080") || currentQuality.label.contains(
                 "1080"
@@ -158,6 +157,16 @@ fun TopSubMenuUI(
                     )
                     Spacer(Modifier.width(16.dp))
 
+                    // ★ 追加: 左右入替ボタン
+                    MenuTileItem(
+                        title = "左右入替", icon = Icons.Default.SwapHoriz,
+                        subtitle = "画面を交換",
+                        onClick = { onSwapScreens(); onCloseMenu() },
+                        modifier = Modifier.focusProperties { down = FocusRequester.Cancel },
+                        contentColor = colors.textPrimary
+                    )
+                    Spacer(Modifier.width(16.dp))
+
                     // 字幕切り替え
                     MenuTileItem(
                         title = AppStrings.MENU_SUBTITLE, icon = Icons.Default.ClosedCaption,
@@ -169,7 +178,7 @@ fun TopSubMenuUI(
                     )
                     Spacer(Modifier.width(16.dp))
 
-                    // ★修正: 画質切り替え (720p上限に補正された品質を表示)
+                    // 画質切り替え
                     MenuTileItem(
                         title = AppStrings.MENU_QUALITY, icon = Icons.Default.Settings,
                         subtitle = effectiveQuality.label,
@@ -242,7 +251,6 @@ fun TopSubMenuUI(
                     )
                     Spacer(Modifier.width(16.dp))
 
-                    // ★修正: 画質
                     MenuTileItem(
                         title = AppStrings.MENU_QUALITY, icon = Icons.Default.Settings,
                         subtitle = effectiveQuality.label,
@@ -286,7 +294,6 @@ fun TopSubMenuUI(
                             .padding(horizontal = 32.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        // ★修正: 二画面時は1080pが除外されたavailableQualitiesでループを回す
                         availableQualities.forEach { quality ->
                             MenuTileItem(
                                 title = quality.label,

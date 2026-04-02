@@ -2,42 +2,35 @@
 
 package com.beeregg2001.komorebi.ui.main
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
+import android.speech.RecognizerIntent
+import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
-import androidx.tv.material3.*
 import com.beeregg2001.komorebi.common.AppStrings
+import com.beeregg2001.komorebi.common.safeRequestFocus
 import com.beeregg2001.komorebi.data.mapper.ReserveMapper
 import com.beeregg2001.komorebi.data.model.ReserveRecordSettings
-import com.beeregg2001.komorebi.data.sync.SyncProgress
 import com.beeregg2001.komorebi.ui.components.AiConciergePanel
 import com.beeregg2001.komorebi.ui.components.GlobalToast
 import com.beeregg2001.komorebi.ui.epg.ProgramDetailMode
@@ -50,8 +43,8 @@ import com.beeregg2001.komorebi.ui.video.RecordListScreen
 import com.beeregg2001.komorebi.ui.video.player.VideoPlayerScreen
 import com.beeregg2001.komorebi.ui.reserve.ReserveSettingsDialog
 import com.beeregg2001.komorebi.ui.reserve.ConditionEditDialog
+import com.beeregg2001.komorebi.util.AudioRecorderHelper
 import com.beeregg2001.komorebi.viewmodel.*
-import com.beeregg2001.komorebi.common.safeRequestFocus
 import com.beeregg2001.komorebi.ui.theme.AppTheme
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import com.beeregg2001.komorebi.ui.theme.getSeasonalBackgroundBrush
@@ -61,7 +54,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.LocalTime
-import java.time.OffsetDateTime
 
 private const val TAG = "MainRootScreen"
 
@@ -75,11 +67,180 @@ fun MainRootScreen(
     settingsViewModel: SettingsViewModel = hiltViewModel(),
     recordViewModel: RecordViewModel,
     reserveViewModel: ReserveViewModel = hiltViewModel(),
+    aiConciergeViewModel: AiConciergeViewModel = hiltViewModel(),
     onExitApp: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = rememberMainRootState()
+
+    val aiTicketManager = state.aiTicketManager
+
+    val isSpeechSupported = remember {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        context.packageManager.resolveActivity(intent, 0) != null
+    }
+
+    val audioRecorderHelper = remember { AudioRecorderHelper(context) }
+    var isRecordingVoice by remember { mutableStateOf(false) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (!isGranted) {
+            state.toastMessage = "マイク権限が必要です。文字入力をご利用ください。"
+        }
+    }
+
+    val stopRecordingAndSend = {
+        if (isRecordingVoice) {
+            val file = audioRecorderHelper.stopRecording()
+            isRecordingVoice = false
+
+            if (file != null && file.exists() && file.length() > 0) {
+                Log.i("AI_Concierge", "🎙️ 録音完了、Geminiに送信します (${file.length()} bytes)")
+                val audioBytes = file.readBytes()
+
+                aiConciergeViewModel.sendAudioWithContext(
+                    audioBytes = audioBytes,
+                    liveChannels = channelViewModel.groupedChannels.value,
+                    recentRecordings = recordViewModel.recentRecordings.value,
+                    groupedSeries = recordViewModel.groupedSeries.value,
+                    activeReserves = reserveViewModel.reserves.value
+                )
+            } else {
+                state.toastMessage = "音声が短すぎるか、録音できませんでした"
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        aiConciergeViewModel.pendingAction.collect { action ->
+            when (action) {
+                is AiConciergeAction.PlayLive -> {
+                    state.isAiConciergeOpen = false
+                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    val target = channelViewModel.groupedChannels.value.values.flatten()
+                        .find { it.id == action.channelId }
+                    if (target != null) {
+                        state.selectedProgram = null
+                        state.isPlayerMiniListOpen = false
+                        state.playerIsSubMenuOpen = false
+                        state.isPlayerSubMenuOpen = false
+                        state.isPlayerSceneSearchOpen = false
+
+                        state.selectedChannel = target
+                        state.lastSelectedChannelId = target.id
+                        homeViewModel.saveLastChannel(target)
+                        state.isReturningFromPlayer = false
+                    }
+                }
+
+                is AiConciergeAction.PlayRecorded -> {
+                    state.isAiConciergeOpen = false
+                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    val target =
+                        recordViewModel.recentRecordings.value.find { it.id == action.videoId }
+                    if (target != null) {
+                        state.selectedChannel = null
+                        state.isPlayerMiniListOpen = false
+                        state.playerIsSubMenuOpen = false
+                        state.isPlayerSubMenuOpen = false
+                        state.isPlayerSceneSearchOpen = false
+
+                        state.initialPlaybackPositionMs = 0L
+                        state.selectedProgram = target
+                        state.lastSelectedProgramId = target.id.toString()
+                        state.showPlayerControls = true
+                        state.isReturningFromPlayer = false
+                    }
+                }
+
+                is AiConciergeAction.SearchEpg -> {
+                    state.isAiConciergeOpen = false
+                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+
+                    val isOnlyDate =
+                        action.keyword.isBlank() && action.genre.isBlank() && action.date.isNotBlank() && !action.isLiveOnly
+
+                    if (isOnlyDate) {
+                        try {
+                            val parsedDate =
+                                java.time.LocalDate.parse(action.date.replace("/", "-"))
+                            val jumpTime = java.time.OffsetDateTime.now()
+                                .withYear(parsedDate.year)
+                                .withMonth(parsedDate.monthValue)
+                                .withDayOfMonth(parsedDate.dayOfMonth)
+                                .withHour(4).withMinute(0).withSecond(0).withNano(0)
+
+                            epgViewModel.updateTargetTime(jumpTime)
+                            state.currentTabIndex = 3
+                            state.toastMessage = "${action.date} の番組表に移動しました"
+                        } catch (e: Exception) {
+                            state.toastMessage = "日付の指定が正しくありません"
+                        }
+                    } else {
+                        epgViewModel.executeSearch(
+                            action.keyword,
+                            action.genre,
+                            action.date,
+                            action.isLiveOnly
+                        )
+                        state.currentTabIndex = 3
+                        state.toastMessage =
+                            if (action.keyword.isNotBlank()) "「${action.keyword}」の検索結果を表示します" else "検索結果を表示します"
+                    }
+                }
+
+                is AiConciergeAction.ReqEpgSearch -> {
+                    scope.launch {
+                        val results = epgViewModel.searchSilently(
+                            action.keyword,
+                            action.genre,
+                            action.date,
+                            action.isLiveOnly
+                        )
+                        aiConciergeViewModel.submitSilentSearchResult(action.keyword, results)
+                    }
+                }
+
+                is AiConciergeAction.ReserveSingle -> {
+                    state.isAiConciergeOpen = false
+                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    reserveViewModel.addReserve(action.programId) {
+                        state.toastMessage = "番組の録画予約を完了しました"
+                    }
+                }
+
+                is AiConciergeAction.ReserveAuto -> {
+                    state.isAiConciergeOpen = false
+                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    reserveViewModel.addEpgReserve(
+                        keyword = action.keyword,
+                        networkId = 0,
+                        transportStreamId = 0,
+                        serviceId = 0,
+                        daysOfWeek = setOf(0, 1, 2, 3, 4, 5, 6),
+                        startHour = 0,
+                        startMinute = 0,
+                        endHour = 23,
+                        endMinute = 59,
+                        excludeKeyword = "",
+                        isTitleOnly = false,
+                        broadcastType = "GR,BS,BS4K,CS,SKY",
+                        isFuzzySearch = true,
+                        duplicateScope = "SameTitle",
+                        priority = 3,
+                        isEventRelay = true,
+                        isExactRecord = true,
+                        onSuccess = {
+                            state.toastMessage = "「${action.keyword}」の自動録画条件を登録しました"
+                        }
+                    )
+                }
+            }
+        }
+    }
 
     val themeName by settingsViewModel.appTheme.collectAsState(initial = "MONOTONE")
     val currentTheme = remember(themeName) {
@@ -119,8 +280,6 @@ fun MainRootScreen(
     val conditions by reserveViewModel.conditions.collectAsState()
     val reserves by reserveViewModel.reserves.collectAsState()
 
-    // ★最適化: syncProgress 全体を監視するのではなく、画面の状態切り替えに必要な
-    // 「初回同期中かどうか」と「エラーがあるか」の Boolean だけを監視して、不要な再描画を防ぐ
     val isSyncingInitial by remember(recordViewModel) {
         recordViewModel.syncProgress.map { it.isSyncing && it.isInitialBuild }
             .distinctUntilChanged()
@@ -129,7 +288,6 @@ fun MainRootScreen(
     val hasSyncError by remember(recordViewModel) {
         recordViewModel.syncProgress.map { it.error != null }.distinctUntilChanged()
     }.collectAsState(initial = false)
-
 
     val isEpgReady by epgViewModel.isInitialLoadComplete.collectAsState()
 
@@ -220,6 +378,7 @@ fun MainRootScreen(
                 state.isAiConciergeOpen = false
                 state.isReturningFromPlayer = true
                 epgViewModel.triggerRestore()
+                aiConciergeViewModel.resetState()
             }
 
             state.selectedConditionReserveItem != null -> state.selectedConditionReserveItem = null
@@ -307,22 +466,27 @@ fun MainRootScreen(
                 .onPreviewKeyEvent { event ->
                     val isCenterKey =
                         event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter
-                    if (isCenterKey) {
-                        if (event.type == KeyEventType.KeyDown) {
-                            if (event.nativeKeyEvent.isLongPress) {
-                                if (!state.isAiConciergeOpen) {
-                                    state.isAiConciergeOpen = true
-                                }
-                                isLongPressHandled = true
-                                return@onPreviewKeyEvent true
-                            }
-                            if (isLongPressHandled) return@onPreviewKeyEvent true
-                        } else if (event.type == KeyEventType.KeyUp) {
-                            if (isLongPressHandled) {
-                                isLongPressHandled = false
-                                return@onPreviewKeyEvent true
-                            }
+
+                    // ★ 修正: KeyUpの時はパネルの状態に関わらず「必ず」長押しフラグをリセットする！
+                    if (isCenterKey && event.type == KeyEventType.KeyUp) {
+                        if (isLongPressHandled) {
+                            isLongPressHandled = false
+                            return@onPreviewKeyEvent true
                         }
+                    }
+
+                    // パネルが開いている間は、以降のキーイベントの横取り（KeyDown等）をしない
+                    if (state.isAiConciergeOpen) return@onPreviewKeyEvent false
+
+                    // パネルが閉じている時の KeyDown 処理（長押しの検知）
+                    if (isCenterKey && event.type == KeyEventType.KeyDown) {
+                        if ((event.nativeKeyEvent.isLongPress || event.nativeKeyEvent.repeatCount > 0) && !isLongPressHandled) {
+                            isLongPressHandled = true
+                            state.isAiConciergeOpen = true
+                            aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
+                            return@onPreviewKeyEvent true
+                        }
+                        if (isLongPressHandled) return@onPreviewKeyEvent true
                     }
                     false
                 }
@@ -337,7 +501,6 @@ fun MainRootScreen(
                 )
             }
 
-            // ★最適化: isSyncingInitial を使って再描画を抑制
             val showMainContent =
                 isSystemReady && isSettingsInitialized && !state.showConnectionErrorDialog && !isSyncingInitial
 
@@ -580,7 +743,6 @@ fun MainRootScreen(
                     }
 
                     if (state.selectedChannel == null && state.selectedProgram == null && !isSyncingInitial) {
-                        // ★最適化: ViewModelを丸ごと渡して、コンポーネント内部で状態を監視させる
                         SyncProgressIndicator(
                             recordViewModel = recordViewModel,
                             modifier = Modifier
@@ -590,7 +752,6 @@ fun MainRootScreen(
                     }
 
                     if (hasSyncError) {
-                        // エラーのメッセージだけは外から取得して渡す（エラーダイアログの表示時のみ再描画）
                         val errorMessage =
                             recordViewModel.syncProgress.value.error ?: "不明なエラー"
                         SyncErrorDialog(
@@ -873,375 +1034,57 @@ fun MainRootScreen(
 
             AiConciergePanel(
                 isOpen = state.isAiConciergeOpen,
+                chatHistory = aiConciergeViewModel.chatHistory.collectAsState().value,
+                isSpeechSupported = isSpeechSupported,
+                isRecording = isRecordingVoice,
+                ticketManager = aiTicketManager,
                 onClose = {
                     state.isAiConciergeOpen = false
                     state.isReturningFromPlayer = true
                     epgViewModel.triggerRestore()
-                }
+                    aiConciergeViewModel.resetState()
+                },
+                onMicLongPressStart = {
+                    if (ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        audioRecorderHelper.startRecording()
+                        isRecordingVoice = true
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onMicLongPressEnd = { stopRecordingAndSend() },
+                onKeyboardClick = { state.showAiKeyboardInput = true }
             )
-        }
-    }
-}
 
-// -------------------------------------------------------------
-// サブコンポーネント (RobustUpdateDialog等)
-// -------------------------------------------------------------
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-fun RobustUpdateDialog(
-    versionName: String,
-    releaseNotes: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val colors = KomorebiTheme.colors
-    val confirmRequester = remember { FocusRequester() }
-    var isDialogFocused by remember { mutableStateOf(true) }
-
-    LaunchedEffect(Unit) { delay(300); runCatching { confirmRequester.requestFocus() } }
-    LaunchedEffect(isDialogFocused) {
-        if (!isDialogFocused) {
-            delay(150); runCatching { confirmRequester.requestFocus() }
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.8f))
-            .zIndex(1000f)
-            .focusGroup()
-            .focusProperties { exit = { FocusRequester.Cancel } }
-            .onFocusChanged { isDialogFocused = it.hasFocus },
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            modifier = Modifier.width(500.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = SurfaceDefaults.colors(containerColor = colors.surface)
-        ) {
-            Column(
-                modifier = Modifier.padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(
-                    Icons.Default.SystemUpdate,
-                    contentDescription = null,
-                    tint = colors.accent,
-                    modifier = Modifier.size(48.dp)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "アップデートのお知らせ",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = colors.textPrimary,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "バージョン $versionName が利用可能です。",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = colors.textPrimary
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 150.dp)
-                        .background(
-                            colors.textPrimary.copy(alpha = 0.05f),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = releaseNotes,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary
-                    )
-                }
-                Spacer(modifier = Modifier.height(32.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Button(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        scale = ButtonDefaults.scale(focusedScale = 1.05f),
-                        colors = ButtonDefaults.colors(
-                            containerColor = colors.textPrimary.copy(alpha = 0.1f),
-                            contentColor = colors.textPrimary,
-                            focusedContainerColor = colors.textPrimary,
-                            focusedContentColor = if (colors.isDark) Color.Black else Color.White
-                        )
-                    ) { Text("後で", fontWeight = FontWeight.Bold) }
-                    Button(
-                        onClick = onConfirm,
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(confirmRequester),
-                        scale = ButtonDefaults.scale(focusedScale = 1.05f),
-                        colors = ButtonDefaults.colors(
-                            containerColor = colors.accent,
-                            contentColor = if (colors.isDark) Color.Black else Color.White,
-                            focusedContainerColor = colors.textPrimary,
-                            focusedContentColor = if (colors.isDark) Color.Black else Color.White
-                        )
-                    ) { Text("ダウンロード", fontWeight = FontWeight.Bold) }
-                }
-            }
-        }
-    }
-}
-
-// ★最適化: ViewModelを受け取って内部で監視するように引数を変更
-@Composable
-fun SyncProgressIndicator(recordViewModel: RecordViewModel, modifier: Modifier = Modifier) {
-    val syncProgress by recordViewModel.syncProgress.collectAsState()
-    val colors = KomorebiTheme.colors
-    val progress =
-        if (syncProgress.total > 0) syncProgress.current.toFloat() / syncProgress.total.toFloat() else 0f
-
-    AnimatedVisibility(
-        visible = syncProgress.isSyncing,
-        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-        modifier = modifier
-    ) {
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            colors = SurfaceDefaults.colors(
-                containerColor = colors.surface.copy(alpha = 0.9f),
-                contentColor = colors.textPrimary
-            )
-        ) {
-            Column(
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .widthIn(min = 200.dp, max = 300.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = syncProgress.progressText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (syncProgress.total > 0) LinearProgressIndicator(
-                    progress = progress,
-                    modifier = Modifier.fillMaxWidth(),
-                    color = colors.accent,
-                    trackColor = colors.textPrimary.copy(alpha = 0.2f)
-                )
-                else LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = colors.accent,
-                    trackColor = colors.textPrimary.copy(alpha = 0.2f)
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-fun SyncErrorDialog(errorMessage: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
-    val colors = KomorebiTheme.colors
-    val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { delay(300); focusRequester.safeRequestFocus("SyncError") }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.85f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            colors = SurfaceDefaults.colors(containerColor = colors.surface),
-            modifier = Modifier.width(420.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "同期エラー",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color(0xFFFF5252),
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = errorMessage,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textSecondary
-                )
-                Spacer(modifier = Modifier.height(32.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Button(
-                        onClick = onDismiss,
-                        colors = ButtonDefaults.colors(
-                            containerColor = colors.textPrimary.copy(alpha = 0.1f),
-                            contentColor = colors.textPrimary
-                        ),
-                        modifier = Modifier.weight(1f)
-                    ) { Text("閉じる") }
-                    Button(
-                        onClick = onRetry,
-                        colors = ButtonDefaults.colors(
-                            containerColor = colors.accent,
-                            contentColor = if (colors.isDark) Color.Black else Color.White
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester)
-                    ) { Text("再実行") }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-fun UpdateDialog(
-    versionName: String,
-    releaseNotes: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val colors = KomorebiTheme.colors
-    val focusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(Unit) { delay(100); focusRequester.requestFocus() }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.8f))
-            .zIndex(200f),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            colors = SurfaceDefaults.colors(
-                containerColor = colors.surface,
-                contentColor = colors.textPrimary
-            ),
-            modifier = Modifier.width(420.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SystemUpdate,
-                    contentDescription = null,
-                    tint = colors.accent,
-                    modifier = Modifier.size(48.dp)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "アップデートのお知らせ",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "最新バージョン ($versionName) が利用可能です。\n\n$releaseNotes\n\nアップデート開始後、Androidのシステム画面が開きますので、「インストール」または「更新」を選択してください。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textSecondary
-                )
-                Spacer(modifier = Modifier.height(32.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Button(
-                        onClick = onDismiss,
-                        colors = ButtonDefaults.colors(
-                            containerColor = colors.textPrimary.copy(alpha = 0.1f),
-                            contentColor = colors.textPrimary
-                        ),
-                        modifier = Modifier.weight(1f)
-                    ) { Text("後で") }
-                    Button(
-                        onClick = onConfirm,
-                        colors = ButtonDefaults.colors(
-                            containerColor = colors.accent,
-                            contentColor = if (colors.isDark) Color.Black else Color.White
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester)
-                    ) { Text("今すぐ更新") }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-fun UpdateProgressBanner(updateState: UpdateState, modifier: Modifier = Modifier) {
-    val colors = KomorebiTheme.colors
-    val isReady = updateState is UpdateState.ReadyToInstall
-    val progress =
-        if (updateState is UpdateState.Downloading) updateState.progressPercentage else 100
-
-    Surface(
-        modifier = modifier.width(280.dp),
-        shape = RoundedCornerShape(8.dp),
-        colors = SurfaceDefaults.colors(
-            containerColor = colors.surface.copy(alpha = 0.95f),
-            contentColor = colors.textPrimary
-        )
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (isReady) Icons.Default.CheckCircle else Icons.Default.Download,
-                    contentDescription = null,
-                    tint = colors.accent,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (isReady) "インストーラ起動中..." else "アップデートをダウンロード中",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            if (!isReady) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .background(
-                            colors.textSecondary.copy(alpha = 0.2f),
-                            RoundedCornerShape(2.dp)
-                        )
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(progress / 100f)
-                            .fillMaxHeight()
-                            .background(colors.accent, RoundedCornerShape(2.dp))
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "$progress %",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.textSecondary,
-                    modifier = Modifier.align(Alignment.End)
+            if (state.showAiKeyboardInput) {
+                AiTextInputDialog(
+                    onSubmit = { text ->
+                        state.showAiKeyboardInput = false
+                        scope.launch {
+                            delay(300)
+                            aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
+                        }
+                        if (text.isNotBlank()) {
+                            aiConciergeViewModel.sendTextWithContext(
+                                userInput = text,
+                                liveChannels = channelViewModel.groupedChannels.value,
+                                recentRecordings = recordViewModel.recentRecordings.value,
+                                groupedSeries = recordViewModel.groupedSeries.value,
+                                activeReserves = reserveViewModel.reserves.value
+                            )
+                        }
+                    },
+                    onDismiss = {
+                        state.showAiKeyboardInput = false
+                        scope.launch {
+                            delay(300)
+                            aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
+                        }
+                    }
                 )
             }
         }

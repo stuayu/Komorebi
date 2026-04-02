@@ -16,9 +16,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
@@ -29,40 +31,82 @@ import javax.inject.Inject
 sealed class AiConciergeAction {
     data class PlayLive(val channelId: String) : AiConciergeAction()
     data class PlayRecorded(val videoId: Int) : AiConciergeAction()
+    data class SearchEpg(
+        val keyword: String,
+        val genre: String,
+        val date: String,
+        val isLiveOnly: Boolean
+    ) : AiConciergeAction()
+
+    data class ReqEpgSearch(
+        val keyword: String,
+        val genre: String,
+        val date: String,
+        val isLiveOnly: Boolean
+    ) : AiConciergeAction()
+
+    data class ReserveSingle(val programId: String) : AiConciergeAction()
+    data class ReserveAuto(val keyword: String) : AiConciergeAction()
 }
 
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val isUser: Boolean,
     val text: String,
-    val isThinking: Boolean = false
+    val isThinking: Boolean = false,
+    val isHidden: Boolean = false
+)
+
+data class AiContextData(
+    val liveChannels: Map<String, List<Channel>>,
+    val recentRecordings: List<RecordedProgram>,
+    val groupedSeries: Map<String, List<SeriesInfo>>,
+    val activeReserves: List<ReserveItem>
 )
 
 @HiltViewModel
 class AiConciergeViewModel @Inject constructor() : ViewModel() {
 
-    private val _chatHistory = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val chatHistory: StateFlow<List<ChatMessage>> = _chatHistory.asStateFlow()
+    private val _internalChatHistory = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatHistory: StateFlow<List<ChatMessage>> = _internalChatHistory
+        .map { list -> list.filter { !it.isHidden } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _pendingAction = MutableSharedFlow<AiConciergeAction>()
     val pendingAction = _pendingAction.asSharedFlow()
 
-    private val apiKey = ""
+    private var lastContextData: AiContextData? = null
+    private val apiKey = "YOUR_API_KEYS"
 
+    // =========================================================================
+    // ★ 修正: 雑談・一般知識への対応力を追加し、余計なタグ出力を封印！
+    // =========================================================================
     private val generativeModel = GenerativeModel(
         modelName = "gemini-3.1-flash-lite-preview",
         apiKey = apiKey,
         systemInstruction = content {
             text(
                 "あなたはTVアプリ「Komorebi」の優秀で親しみやすいAIコンシェルジュです。\n" +
-                        "ユーザーの視聴履歴や録画リストを知っています。\n" +
-                        "番組を勧める際は「1. 番組名」のように番号を振ってください。\n\n" +
-                        "【超重要：再生アクションの実行方法】\n" +
-                        "ユーザーが番組の再生を指示した場合、回答テキストの最後に以下の形式の【特殊コマンドタグ】を出力してください。\n" +
-                        "ライブ放送の場合: [PLAY_LIVE:提供されたLIVE_ID]\n" +
-                        "録画番組の場合: [PLAY_REC:提供されたREC_ID]\n\n" +
-                        "※【警告1】ユーザーが「1番を再生して」と指示した場合、直前の会話履歴から1番として提案した番組を読み取り、その番組の実際の REC_ID または LIVE_ID をコンテキストから探し出してタグに入れてください。絶対に [PLAY_REC:1] のようにリスト番号をそのまま出力しないでください。\n" +
-                        "※【警告2】コンテキストで提供された情報の中に、ユーザーが求める番組のIDが存在しない場合は、絶対にコマンドタグを出力せず、「申し訳ありません。その番組は直近のリストに見当たらないため、お手数ですがビデオタブから探してみてください。」と正直に案内してください。"
+                        "ユーザーの意図を汲み取り、アプリの操作が必要な場合のみ【特殊コマンドタグ】を出力します。\n\n" +
+                        "【重要: 回答の簡潔さ】\n" +
+                        "録画リストや番組一覧などを聞かれた場合、コンテキストにある全ての番組を回答すると長すぎるため、代表的な3〜5件のみを抜粋して答えてください。\n\n" +
+                        "【重要: 一般知識や雑談への対応（愛嬌と万能さ）】\n" +
+                        "テレビ番組とは直接関係のない一般的な質問（楽曲情報、トリビア、天気、日常会話など）をされた場合、番組表にないことを謝罪する必要はありません。\n" +
+                        "あなたは博識なアシスタントとして、その質問の答えを直接、明るく簡潔に教えてあげてください。\n\n" +
+                        "【重要: タグを出力しないケース】\n" +
+                        "「録画リストを教えて」「この番組について教えて」といった情報提供や、上記の「一般知識・雑談」など、画面遷移や再生・予約操作が不要な場合は、**例文であっても絶対にタグを出力しないでください**。\n\n" +
+                        "【アプリ操作が必要な場合のタグ一覧】\n" +
+                        "再生:\n" +
+                        "・[PLAY_LIVE: LIVE_ID]\n" +
+                        "・[PLAY_REC: REC_ID]\n\n" +
+                        "番組検索・予約 (必ず [タグ名: キーワード | ジャンル | 日付 | 生中継(true/false)] の形式。不要項目は空白にする):\n" +
+                        "1. 検索結果を画面で見たい場合\n" +
+                        "   ・[SEARCH_EPG: キーワード | ジャンル | 日付 | 生中継(true/false)]\n" +
+                        "2. 録画予約したい場合 (裏側で検索)\n" +
+                        "   ・[REQ_EPG_SEARCH: キーワード | ジャンル | 日付 | 生中継(true/false)]\n" +
+                        "3. 予約の確定 (REQ_EPG_SEARCHの検索結果を受け取った後)\n" +
+                        "   ・[RESERVE_SINGLE: PROGRAM_ID]\n" +
+                        "   ・[RESERVE_AUTO: キーワード]"
             )
         }
     )
@@ -76,10 +120,12 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
         activeReserves: List<ReserveItem>
     ) {
         viewModelScope.launch {
+            lastContextData =
+                AiContextData(liveChannels, recentRecordings, groupedSeries, activeReserves)
             val userMsg = ChatMessage(isUser = true, text = userInput)
             val aiThinkingMsg = ChatMessage(isUser = false, text = "", isThinking = true)
             val historyText = buildHistoryText()
-            _chatHistory.value = _chatHistory.value + userMsg + aiThinkingMsg
+            _internalChatHistory.value = _internalChatHistory.value + userMsg + aiThinkingMsg
 
             try {
                 val contextPrompt = withContext(Dispatchers.Default) {
@@ -108,12 +154,13 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
         activeReserves: List<ReserveItem>
     ) {
         viewModelScope.launch {
-            // ★ 初期状態は「解析中」にしておく
+            lastContextData =
+                AiContextData(liveChannels, recentRecordings, groupedSeries, activeReserves)
             val userMsgId = UUID.randomUUID().toString()
             val userMsg = ChatMessage(id = userMsgId, isUser = true, text = "🎤 音声を解析中...")
             val aiThinkingMsg = ChatMessage(isUser = false, text = "", isThinking = true)
             val historyText = buildHistoryText()
-            _chatHistory.value = _chatHistory.value + userMsg + aiThinkingMsg
+            _internalChatHistory.value = _internalChatHistory.value + userMsg + aiThinkingMsg
 
             try {
                 val contextPrompt = withContext(Dispatchers.Default) {
@@ -126,13 +173,56 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
                 }
                 val response = generativeModel.generateContent(content {
                     blob("audio/wav", audioBytes)
-                    text(
-                        "$contextPrompt\n$historyText\n\n" +
-                                "【超重要】添付された音声の指示内容を理解し、要望に答えてください。再生指示があった場合は特殊コマンドタグを出力してください。\n" +
-                                "また、必ずレスポンスの1行目に「認識結果: (ユーザーが言った言葉)」という形式で、聞き取った言葉を出力してから、次の行にAIとしての回答を続けてください。"
-                    )
+                    text("$contextPrompt\n$historyText\n\n必ずレスポンスの1行目に「認識結果: (言葉)」と出力してから回答してください。")
                 })
                 handleAiResponse(response.text, aiThinkingMsg.id, userMsgId)
+            } catch (e: Exception) {
+                handleAiError(e, aiThinkingMsg.id)
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    fun submitSilentSearchResult(keyword: String, results: List<UiSearchResultItem>) {
+        viewModelScope.launch {
+            val searchResultText = if (results.isEmpty()) {
+                "システム: 条件に一致する検索結果は0件でした。謝罪するか、条件を緩めて再検索（[REQ_EPG_SEARCH: 別の単語 | | | false]）してください。"
+            } else {
+                val sb = java.lang.StringBuilder("システム: 検索結果は以下の通りです。\n")
+                results.take(5).forEach { res ->
+                    val p = res.program
+                    sb.append("- ${p.title} (${p.start_time}) [PROGRAM_ID: ${p.id}]\n")
+                }
+                sb.append("\nユーザーの意図に合うものがあれば [RESERVE_SINGLE: PROGRAM_ID] を出力し、毎週録画などの指定があれば [RESERVE_AUTO: キーワード] を出力して報告してください。")
+                sb.toString()
+            }
+
+            _internalChatHistory.value = _internalChatHistory.value + ChatMessage(
+                isUser = true,
+                text = searchResultText,
+                isHidden = true
+            )
+            val aiThinkingMsg = ChatMessage(isUser = false, text = "", isThinking = true)
+            _internalChatHistory.value = _internalChatHistory.value + aiThinkingMsg
+
+            try {
+                val historyText = buildHistoryText()
+                val contextData = lastContextData
+                val contextPrompt = if (contextData != null) {
+                    withContext(Dispatchers.Default) {
+                        buildContextPrompt(
+                            contextData.liveChannels,
+                            contextData.recentRecordings,
+                            contextData.groupedSeries,
+                            contextData.activeReserves
+                        )
+                    }
+                } else ""
+
+                val response = generativeModel.generateContent(content {
+                    text("$contextPrompt\n$historyText\n\nシステムからの検索結果を元に、ユーザーへ回答と最終的な予約タグを出力してください。")
+                })
+                handleAiResponse(response.text, aiThinkingMsg.id, null)
             } catch (e: Exception) {
                 handleAiError(e, aiThinkingMsg.id)
             }
@@ -142,67 +232,140 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
     private suspend fun handleAiResponse(rawText: String?, messageId: String, userMsgId: String?) {
         var responseText = rawText ?: ""
 
-        // ★ 1. Geminiに言わせた「認識結果」を抽出してユーザーの吹き出しを更新
+        Log.i("AI_Concierge", "🤖 AI Raw Output:\n$responseText")
+
         if (userMsgId != null) {
             val recognizedRegex = Regex("""認識結果:\s*(.+)""")
             val recognizedMatch = recognizedRegex.find(responseText)
             if (recognizedMatch != null) {
                 val recognizedText = recognizedMatch.groupValues[1]
-                _chatHistory.value = _chatHistory.value.map {
+                _internalChatHistory.value = _internalChatHistory.value.map {
                     if (it.id == userMsgId) it.copy(text = "🎤 「$recognizedText」") else it
                 }
                 responseText = responseText.replace(recognizedRegex, "").trim()
             } else {
-                _chatHistory.value = _chatHistory.value.map {
+                _internalChatHistory.value = _internalChatHistory.value.map {
                     if (it.id == userMsgId) it.copy(text = "🎤 (音声入力)") else it
                 }
             }
         }
 
-        // 2. コマンドタグの抽出
-        val liveRegex = Regex("""\[PLAY_LIVE:(.+?)\]""")
-        val recRegex = Regex("""\[PLAY_REC:(.+?)\]""")
+        val liveRegex = Regex("""\[PLAY_LIVE:\s*([^\]\s]+)\]?""")
+        val recRegex = Regex("""\[PLAY_REC:\s*([0-9]+)\]?""")
+        val searchRegex = Regex("""\[SEARCH_EPG:\s*([^\]]+)\]""")
+        val reqSearchRegex = Regex("""\[REQ_EPG_SEARCH:\s*([^\]]+)\]""")
+        val resSingleRegex = Regex("""\[RESERVE_SINGLE:\s*([^\]\s]+).*?\]""")
+        val resAutoRegex = Regex("""\[RESERVE_AUTO:\s*([^\]\|]+).*?\]""")
 
         val liveMatch = liveRegex.find(responseText)
         val recMatch = recRegex.find(responseText)
+        val searchMatch = searchRegex.find(responseText)
+        val reqSearchMatch = reqSearchRegex.find(responseText)
+        val resSingleMatches = resSingleRegex.findAll(responseText).toList()
+        val resAutoMatch = resAutoRegex.find(responseText)
 
-        if (liveMatch != null) responseText = responseText.replace(liveRegex, "").trim()
-        if (recMatch != null) responseText = responseText.replace(recRegex, "").trim()
+        Log.i(
+            "AI_Concierge", "🧩 Parsed Tags -> " +
+                "Live:${liveMatch?.groupValues}, Rec:${recMatch?.groupValues}, " +
+                "Search:${searchMatch?.groupValues}, ReqSearch:${reqSearchMatch?.groupValues}, " +
+                "ResSingle:${resSingleMatches.map { it.groupValues[1] }}, ResAuto:${resAutoMatch?.groupValues}"
+        )
 
-        if (responseText.isBlank() && (liveMatch != null || recMatch != null)) {
-            responseText = "はい、再生を開始します！"
-        } else if (responseText.isBlank()) {
-            responseText = "すみません、うまく処理できませんでした。"
+        listOf(
+            liveRegex,
+            recRegex,
+            searchRegex,
+            reqSearchRegex,
+            resSingleRegex,
+            resAutoRegex
+        ).forEach { regex ->
+            responseText = responseText.replace(regex, "").trim()
         }
 
-        // 3. AIの吹き出しを更新
-        _chatHistory.value = _chatHistory.value.map {
+        if (responseText.isBlank() && (liveMatch != null || recMatch != null)) responseText =
+            "はい、再生を開始します！"
+        else if (responseText.isBlank() && searchMatch != null) responseText =
+            "はい、番組表を検索します！"
+        else if (responseText.isBlank() && (resSingleMatches.isNotEmpty() || resAutoMatch != null)) responseText =
+            "はい、予約を登録しました！"
+        else if (responseText.isBlank() && reqSearchMatch == null) responseText =
+            "すみません、うまく処理できませんでした。"
+
+        _internalChatHistory.value = _internalChatHistory.value.map {
             if (it.id == messageId) it.copy(text = responseText, isThinking = false) else it
         }
 
-        // 4. 文字が表示されきるまで待機してから再生アクションを実行
         val displayDelayMs = (responseText.length * 15L) + 1500L
 
         if (liveMatch != null) {
             viewModelScope.launch {
-                delay(displayDelayMs)
-                _pendingAction.emit(AiConciergeAction.PlayLive(liveMatch.groupValues[1]))
+                delay(displayDelayMs); _pendingAction.emit(
+                AiConciergeAction.PlayLive(
+                    liveMatch.groupValues[1].trim()
+                )
+            )
             }
         } else if (recMatch != null) {
-            val id = recMatch.groupValues[1].toIntOrNull()
-            if (id != null) {
-                viewModelScope.launch {
-                    delay(displayDelayMs)
-                    _pendingAction.emit(AiConciergeAction.PlayRecorded(id))
+            val id = recMatch.groupValues[1].trim().toIntOrNull()
+            if (id != null) viewModelScope.launch {
+                delay(displayDelayMs); _pendingAction.emit(
+                AiConciergeAction.PlayRecorded(id)
+            )
+            }
+        } else if (searchMatch != null) {
+            val parts = searchMatch.groupValues[1].split("|").map { it.trim() }
+            val kw = parts.getOrNull(0) ?: ""
+            val gen = parts.getOrNull(1) ?: ""
+            val date = parts.getOrNull(2) ?: ""
+            val isLive = parts.getOrNull(3)?.toBooleanStrictOrNull() ?: false
+            viewModelScope.launch {
+                delay(displayDelayMs); _pendingAction.emit(
+                AiConciergeAction.SearchEpg(
+                    kw,
+                    gen,
+                    date,
+                    isLive
+                )
+            )
+            }
+        } else if (reqSearchMatch != null) {
+            val parts = reqSearchMatch.groupValues[1].split("|").map { it.trim() }
+            val kw = parts.getOrNull(0) ?: ""
+            val gen = parts.getOrNull(1) ?: ""
+            val date = parts.getOrNull(2) ?: ""
+            val isLive = parts.getOrNull(3)?.toBooleanStrictOrNull() ?: false
+            _pendingAction.emit(AiConciergeAction.ReqEpgSearch(kw, gen, date, isLive))
+        } else if (resSingleMatches.isNotEmpty()) {
+            viewModelScope.launch {
+                delay(displayDelayMs)
+                resSingleMatches.forEach { match ->
+                    val id = match.groupValues[1].trim()
+                    _pendingAction.emit(AiConciergeAction.ReserveSingle(id))
                 }
+            }
+        } else if (resAutoMatch != null) {
+            viewModelScope.launch {
+                delay(displayDelayMs); _pendingAction.emit(
+                AiConciergeAction.ReserveAuto(
+                    resAutoMatch.groupValues[1].trim()
+                )
+            )
             }
         }
     }
 
     private fun handleAiError(e: Exception, messageId: String) {
-        val errorText =
-            if (e is QuotaExceededException) "【API制限】短時間にリクエストが集中しました。少し待ってから再度お試しください。" else "エラーが発生しました。通信環境を確認してください。"
-        _chatHistory.value = _chatHistory.value.map {
+        Log.e("AI_Concierge", "🚨 AI API通信エラー発生: ", e)
+        val errorText = when {
+            e is QuotaExceededException || e.message?.contains("429") == true -> "【API制限】少し待ってからお試しください。"
+            e.message?.contains(
+                "timeout",
+                ignoreCase = true
+            ) == true -> "【タイムアウト】Geminiサーバーからの応答がありません。"
+
+            else -> "通信エラーが発生しました: ${e.localizedMessage}"
+        }
+        _internalChatHistory.value = _internalChatHistory.value.map {
             if (it.id == messageId) it.copy(
                 text = errorText,
                 isThinking = false
@@ -211,10 +374,10 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
     }
 
     private fun buildHistoryText(): String {
-        val recentHistory = _chatHistory.value.filter { !it.isThinking }.takeLast(6)
+        val recentHistory = _internalChatHistory.value.filter { !it.isThinking }.takeLast(6)
         if (recentHistory.isEmpty()) return ""
         val sb = StringBuilder("\n【直近の会話履歴】\n")
-        recentHistory.forEach { msg -> sb.append("${if (msg.isUser) "ユーザー" else "AI"}: ${msg.text}\n") }
+        recentHistory.forEach { msg -> sb.append("${if (msg.isUser) "ユーザー(またはシステム)" else "AI"}: ${msg.text}\n") }
         return sb.toString()
     }
 
@@ -235,6 +398,7 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
     }
 
     fun resetState() {
-        _chatHistory.value = emptyList()
+        _internalChatHistory.value = emptyList()
+        lastContextData = null
     }
 }

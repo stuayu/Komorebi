@@ -1095,16 +1095,16 @@ fun LivePlayerScreen(
             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
         ) {
             TopSubMenuUI(
-                ps.currentAudioMode,
-                ps.currentStreamSource,
-                ps.currentQuality,
-                isMirakurunAvailable,
-                isSubtitleEnabled,
-                true,
-                isCommentEnabled,
-                isRecording,
-                ps.isSignalInfoVisible,
-                ps.isDualDisplayMode,
+                currentAudioMode = ps.currentAudioMode,
+                currentSource = ps.currentStreamSource,
+                currentQuality = ps.currentQuality,
+                isMirakurunAvailable = isMirakurunAvailable,
+                isSubtitleEnabled = isSubtitleEnabled,
+                isSubtitleSupported = true,
+                isCommentEnabled = isCommentEnabled,
+                isRecording = isRecording,
+                isSignalInfoVisible = ps.isSignalInfoVisible,
+                isDualDisplayMode = ps.isDualDisplayMode,
                 onDualDisplayToggle = {
                     if (!ps.isDualDisplayMode && ps.currentStreamSource == StreamSource.MIRAKURUN && allowMirakurunDual != "ON") {
                         ps.showMirakurunDualWarningDialog = true
@@ -1121,6 +1121,20 @@ fun LivePlayerScreen(
                                 ps.previousStreamSource = null
                             }
                         }
+                    }
+                },
+                onSwapScreens = {
+                    // ★ 追加: Stateから持ってきた左右スワップロジック
+                    if (ps.isDualDisplayMode && ps.dualRightChannel != null) {
+                        val oldLeft = currentChannelItem
+                        val oldRight = ps.dualRightChannel!!
+                        onChannelSelect(oldRight)
+                        ps.dualRightChannel = oldLeft
+                        ps.sseStatus = "Standby"
+                        ps.sseDetail = AppStrings.SSE_CONNECTING
+                        ps.dualSseStatus = "Standby"
+                        ps.dualSseDetail = AppStrings.SSE_CONNECTING
+                        onShowToast(AppStrings.TOAST_DUAL_SCREEN_SWAPPED)
                     }
                 },
                 onSignalInfoToggle = { ps.isSignalInfoVisible = !ps.isSignalInfoVisible },
@@ -1140,8 +1154,8 @@ fun LivePlayerScreen(
                     }
                     onSubMenuToggle(false)
                 },
-                subMenuFocusRequester,
-                {
+                focusRequester = subMenuFocusRequester,
+                onAudioToggle = {
                     ps.currentAudioMode =
                         if (ps.currentAudioMode == AudioMode.MAIN) AudioMode.SUB else AudioMode.MAIN
                     val audioGroups =
@@ -1163,7 +1177,7 @@ fun LivePlayerScreen(
                         )
                     )
                 },
-                {
+                onSourceToggle = {
                     if (isMirakurunAvailable) {
                         ps.currentStreamSource =
                             if (ps.currentStreamSource == StreamSource.MIRAKURUN) StreamSource.KONOMITV else StreamSource.MIRAKURUN
@@ -1171,25 +1185,25 @@ fun LivePlayerScreen(
                         onSubMenuToggle(false)
                     }
                 },
-                {
-                    subtitleEnabledState.value =
-                        !subtitleEnabledState.value; onShowToast(
-                    String.format(
-                        AppStrings.TOAST_SUBTITLE_CHANGED,
-                        if (subtitleEnabledState.value) AppStrings.STATE_SHOW else AppStrings.STATE_HIDE
+                onSubtitleToggle = {
+                    subtitleEnabledState.value = !subtitleEnabledState.value
+                    onShowToast(
+                        String.format(
+                            AppStrings.TOAST_SUBTITLE_CHANGED,
+                            if (subtitleEnabledState.value) AppStrings.STATE_SHOW else AppStrings.STATE_HIDE
+                        )
                     )
-                )
                 },
-                {
-                    isCommentEnabled =
-                        !isCommentEnabled; onShowToast(
-                    String.format(
-                        AppStrings.TOAST_COMMENT_CHANGED,
-                        if (isCommentEnabled) AppStrings.STATE_SHOW else AppStrings.STATE_HIDE
+                onCommentToggle = {
+                    isCommentEnabled = !isCommentEnabled
+                    onShowToast(
+                        String.format(
+                            AppStrings.TOAST_COMMENT_CHANGED,
+                            if (isCommentEnabled) AppStrings.STATE_SHOW else AppStrings.STATE_HIDE
+                        )
                     )
-                )
                 },
-                {
+                onQualitySelect = {
                     if (ps.currentQuality != it) {
                         ps.currentQuality = it; ps.retryKey++; onShowToast(
                             String.format(
@@ -1199,7 +1213,7 @@ fun LivePlayerScreen(
                         )
                     }; onSubMenuToggle(false)
                 },
-                { onSubMenuToggle(false) }
+                onCloseMenu = { onSubMenuToggle(false) }
             )
         }
 
