@@ -188,64 +188,49 @@ class EpgViewModel @Inject constructor(
      * 結果は番組単体ではなく、チャンネル情報とロゴURLを結合したUiSearchResultItemのリストとしてUIに提供します。
      */
     // ==========================================
-    // ★ 修正: 日付・ジャンル・生放送(isLiveOnly)に対応した検索メソッド
+    // ★ 修正: 超スッキリした検索呼び出しメソッド
     // ==========================================
     @OptIn(UnstableApi::class)
-    fun executeSearch(keyword: String, genre: String? = null, dateStr: String? = null, isLiveOnly: Boolean = false) {
+    fun executeSearch(
+        keyword: String,
+        genre: String? = null,
+        dateStr: String? = null,
+        isLiveOnly: Boolean = false,
+        channelName: String? = null
+    ) {
         viewModelScope.launch {
             _isSearching.value = true
-            val displayQuery = if (keyword.isNotBlank()) keyword else (genre ?: "")
+
+            // UIに表示するためのテキストを生成
+            val displayQuery = listOfNotNull(
+                keyword.takeIf { it.isNotBlank() },
+                channelName?.takeIf { it.isNotBlank() },
+                genre?.takeIf { it.isNotBlank() }
+            ).joinToString(" ")
+
             _searchQuery.value = displayQuery
             _activeSearchQuery.value = displayQuery
-
-            if (displayQuery.isNotBlank()) {
-                addSearchHistory(displayQuery)
-            }
+            if (displayQuery.isNotBlank()) addSearchHistory(displayQuery)
 
             try {
-                Log.i("EPG_Search", "🔍 検索開始 [UI] - Query: '$displayQuery', Genre: '$genre', Date: '$dateStr', isLive: $isLiveOnly")
-                val rawResults = repository.searchFuturePrograms(displayQuery)
+                // 最強になったRepositoryの検索エンジンを呼ぶだけ！
+                val rawResults = repository.searchFuturePrograms(
+                    keyword,
+                    genre,
+                    dateStr,
+                    isLiveOnly,
+                    channelName
+                )
 
-                val targetTvDate = try {
-                    dateStr?.takeIf { it.isNotBlank() }?.let {
-                        java.time.LocalDate.parse(it.replace("/", "-"))
-                    }
-                } catch (e: Exception) { null }
-
-                val filtered = rawResults.filter { item ->
-                    val matchGenre = genre.isNullOrBlank() ||
-                            (item.program.genres?.any { it.major.contains(genre) || it.middle.contains(genre) } == true) ||
-                            item.program.title.contains(genre)
-
-                    val matchDate = if (targetTvDate != null) {
-                        try {
-                            val tvDate = getTvDayStart(OffsetDateTime.parse(item.program.start_time)).toLocalDate()
-                            tvDate == targetTvDate
-                        } catch (e: Exception) { false }
-                    } else true
-
-                    // ★ 追加: 生放送フィルター
-                    val matchLive = if (isLiveOnly) {
-                        val title = item.program.title ?: ""
-                        val desc = item.program.description ?: ""
-                        val detail = item.program.detail?.values?.joinToString(" ") ?: ""
-                        title.contains("[生]") || title.contains("【生】") || title.contains("生中継") || title.contains("生放送") || title.contains("LIVE", ignoreCase = true) ||
-                                desc.contains("生中継") || desc.contains("生放送") || detail.contains("生中継") || detail.contains("生放送")
-                    } else true
-
-                    matchGenre && matchDate && matchLive
-                }.map { item ->
+                _searchResults.value = rawResults.map { item ->
                     UiSearchResultItem(
                         program = item.program,
                         channel = item.channel,
                         logoUrl = getLogoUrl(item.channel)
                     )
                 }
-
-                Log.i("EPG_Search", "🎯 絞り込み後の件数: ${filtered.size}件")
-                _searchResults.value = filtered
             } catch (e: Exception) {
-                Log.e("EPG_Search", "Search Error", e)
+                Log.e("EpgViewModel", "Search Error", e)
                 _searchResults.value = emptyList()
             } finally {
                 _isSearching.value = false
@@ -253,46 +238,17 @@ class EpgViewModel @Inject constructor(
         }
     }
 
-    // ==========================================
-    // ★ 修正: 裏側サイレント検索
-    // ==========================================
-    @OptIn(UnstableApi::class)
-    suspend fun searchSilently(keyword: String, genre: String? = null, dateStr: String? = null, isLiveOnly: Boolean = false): List<UiSearchResultItem> {
-        val query = if (keyword.isNotBlank()) keyword else (genre ?: "")
-        if (query.isEmpty() && dateStr.isNullOrBlank()) return emptyList()
-
+    suspend fun searchSilently(
+        keyword: String,
+        genre: String? = null,
+        dateStr: String? = null,
+        isLiveOnly: Boolean = false,
+        channelName: String? = null
+    ): List<UiSearchResultItem> {
         return try {
-            Log.i("EPG_Search", "🕵️‍♂️ 裏側検索開始 [Silent] - Query: '$query', Genre: '$genre', Date: '$dateStr', isLive: $isLiveOnly")
-            val rawResults = repository.searchFuturePrograms(query)
-
-            val targetTvDate = try {
-                dateStr?.takeIf { it.isNotBlank() }?.let {
-                    java.time.LocalDate.parse(it.replace("/", "-"))
-                }
-            } catch (e: Exception) { null }
-
-            rawResults.filter { item ->
-                val matchGenre = genre.isNullOrBlank() ||
-                        (item.program.genres?.any { it.major.contains(genre) || it.middle.contains(genre) } == true) ||
-                        item.program.title.contains(genre)
-
-                val matchDate = if (targetTvDate != null) {
-                    try {
-                        val tvDate = getTvDayStart(OffsetDateTime.parse(item.program.start_time)).toLocalDate()
-                        tvDate == targetTvDate
-                    } catch (e: Exception) { false }
-                } else true
-
-                val matchLive = if (isLiveOnly) {
-                    val title = item.program.title ?: ""
-                    val desc = item.program.description ?: ""
-                    val detail = item.program.detail?.values?.joinToString(" ") ?: ""
-                    title.contains("[生]") || title.contains("【生】") || title.contains("生中継") || title.contains("生放送") || title.contains("LIVE", ignoreCase = true) ||
-                            desc.contains("生中継") || desc.contains("生放送") || detail.contains("生中継") || detail.contains("生放送")
-                } else true
-
-                matchGenre && matchDate && matchLive
-            }.map { item ->
+            val rawResults =
+                repository.searchFuturePrograms(keyword, genre, dateStr, isLiveOnly, channelName)
+            rawResults.map { item ->
                 UiSearchResultItem(
                     program = item.program,
                     channel = item.channel,
@@ -300,7 +256,6 @@ class EpgViewModel @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            Log.e("EPG_Search", "Silent Search Error", e)
             emptyList()
         }
     }
@@ -352,7 +307,7 @@ class EpgViewModel @Inject constructor(
                     viewModelScope.launch { refreshEpgData(type) }
 
                     // ★追加: 検索・AI予約のために、他の放送波（BS・CS・SKY等）も裏側でメモリにキャッシュしておく！
-                    preloadEpgDataForSearch(listOf("GR", "BS", "CS", "SKY","BS4K"))
+                    preloadEpgDataForSearch(listOf("GR", "BS", "CS", "SKY", "BS4K"))
 
                 } else if ((isMirakurunReady || isKonomiReady) && hasInitialFetched) {
                     refreshEpgData(type)

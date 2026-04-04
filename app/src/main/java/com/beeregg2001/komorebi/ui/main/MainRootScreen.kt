@@ -156,12 +156,14 @@ fun MainRootScreen(
                     }
                 }
 
+                // 作戦A: UI連動の検索（検索結果画面を開く）
                 is AiConciergeAction.SearchEpg -> {
                     state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    aiConciergeViewModel.resetState()
 
+                    // ★ チャンネル名も空である場合のみ、ジャンプとみなす
                     val isOnlyDate =
-                        action.keyword.isBlank() && action.genre.isBlank() && action.date.isNotBlank() && !action.isLiveOnly
+                        action.keyword.isBlank() && action.genre.isBlank() && action.date.isNotBlank() && !action.isLiveOnly && action.channelName.isBlank()
 
                     if (isOnlyDate) {
                         try {
@@ -180,11 +182,13 @@ fun MainRootScreen(
                             state.toastMessage = "日付の指定が正しくありません"
                         }
                     } else {
+                        // チャンネル名を5つ目の引数として渡す
                         epgViewModel.executeSearch(
                             action.keyword,
                             action.genre,
                             action.date,
-                            action.isLiveOnly
+                            action.isLiveOnly,
+                            action.channelName
                         )
                         state.currentTabIndex = 3
                         state.toastMessage =
@@ -192,13 +196,16 @@ fun MainRootScreen(
                     }
                 }
 
+                // 作戦B-前半: 内部ループ用サイレント検索
                 is AiConciergeAction.ReqEpgSearch -> {
                     scope.launch {
+                        // チャンネル名を5つ目の引数として渡す
                         val results = epgViewModel.searchSilently(
                             action.keyword,
                             action.genre,
                             action.date,
-                            action.isLiveOnly
+                            action.isLiveOnly,
+                            action.channelName
                         )
                         aiConciergeViewModel.submitSilentSearchResult(action.keyword, results)
                     }
