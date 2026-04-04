@@ -121,14 +121,10 @@ fun SettingsScreen(
                 FocusRequester()
             ), // 6: Comment
             listOf(
-                FocusRequester(),
-                FocusRequester(),
-                FocusRequester(),
-                FocusRequester(),
-                FocusRequester(),
-                FocusRequester(),
-                FocusRequester()
-            ), // 7: Lab
+                FocusRequester(), // 0: dualR (Mirakurun)
+                FocusRequester(), // 1: baseballR
+                FocusRequester()  // 2: apiKeyR
+            ),
             listOf(FocusRequester()) // 8: AppInfo
         )
     }
@@ -517,7 +513,6 @@ fun SettingsScreen(
                                 }
                             },
                             onStart = {
-                                // ★ 修正: フォロー球団が設定されている場合のみ、プロ野球タブを選択可能にする
                                 val options = if (prefs.favoriteBaseballTeams.isNotEmpty()) {
                                     listOf(
                                         AppStrings.SETTINGS_VALUE_TAB_HOME to "ホーム",
@@ -606,8 +601,6 @@ fun SettingsScreen(
                     }
 
                     5 -> {
-                        // [解説: 設定画面でのチャンネル名の解決]
-                        // 起動時チャンネルとして保存されているIDを、flatChannelsの中から検索して実際の番組名に変換します。
                         val channelName = when (prefs.startupChannel) {
                             "OFF" -> AppStrings.SETTINGS_VALUE_STARTUP_OFF
                             "LAST_WATCHED" -> AppStrings.SETTINGS_VALUE_STARTUP_LAST
@@ -617,10 +610,9 @@ fun SettingsScreen(
 
                         DisplaySettingsContent(
                             preferences = prefs,
-                            startupChannelName = channelName, // ★追加
+                            startupChannelName = channelName,
                             sidebarR = categoryFocusRequesters[5],
                             onEditTab = {
-                                // ★ 修正: フォロー球団が設定されている場合のみ、プロ野球タブを選択可能にする
                                 val options = if (prefs.favoriteBaseballTeams.isNotEmpty()) {
                                     listOf(
                                         AppStrings.SETTINGS_VALUE_TAB_HOME to "ホーム",
@@ -730,70 +722,15 @@ fun SettingsScreen(
                     )
 
                     7 -> LabSettingsContent(
-                        annict = prefs.labAnnict,
-                        shobocal = prefs.labShobocal,
-                        postCmd = prefs.defaultPostCommand,
-                        enableAi = prefs.enableAiNormalization,
                         apiKey = prefs.geminiApiKey,
                         baseball = prefs.favoriteBaseballTeams,
                         mirakurunDual = prefs.labAllowMirakurunDual,
-                        annictR = itemFocusRequesters[7][0],
-                        shobocalR = itemFocusRequesters[7][1],
-                        cmdR = itemFocusRequesters[7][2],
-                        enableAiR = itemFocusRequesters[7][3],
-                        apiKeyR = itemFocusRequesters[7][4],
-                        baseballR = itemFocusRequesters[7][5],
-                        dualR = itemFocusRequesters[7][6],
+                        dualR = itemFocusRequesters[7][0],
+                        baseballR = itemFocusRequesters[7][1],
+                        apiKeyR = itemFocusRequesters[7][2],
                         sidebarR = categoryFocusRequesters[7],
-                        onAnnict = {
-                            scope.launch {
-                                repository.saveString(
-                                    SettingsRepository.LAB_ANNICT_INTEGRATION,
-                                    if (prefs.labAnnict == "ON") "OFF" else "ON"
-                                )
-                            }
-                        },
-                        onShobocal = {
-                            scope.launch {
-                                repository.saveString(
-                                    SettingsRepository.LAB_SHOBOCAL_INTEGRATION,
-                                    if (prefs.labShobocal == "ON") "OFF" else "ON"
-                                )
-                            }
-                        },
-                        onEditCmd = {
-                            uiState.activeDialog = SettingDialogState.Input(
-                                AppStrings.SETTINGS_INPUT_POST_COMMAND,
-                                prefs.defaultPostCommand
-                            ) {
-                                scope.launch {
-                                    repository.saveString(
-                                        SettingsRepository.DEFAULT_POST_COMMAND,
-                                        it
-                                    )
-                                }
-                            }
-                        },
-                        onToggleAi = {
-                            scope.launch {
-                                repository.saveString(
-                                    SettingsRepository.ENABLE_AI_NORMALIZATION,
-                                    if (prefs.enableAiNormalization == "ON") "OFF" else "ON"
-                                )
-                            }
-                        },
                         onEditApiKey = {
-                            uiState.activeDialog = SettingDialogState.Input(
-                                "Gemini API Key",
-                                prefs.geminiApiKey
-                            ) {
-                                scope.launch {
-                                    repository.saveString(
-                                        SettingsRepository.GEMINI_API_KEY,
-                                        it
-                                    )
-                                }
-                            }
+                            uiState.activeDialog = SettingDialogState.GeminiSetup
                         },
                         onBaseball = {
                             val npbTeams = listOf(
@@ -879,6 +816,40 @@ fun SettingsScreen(
             onDismiss = { closeDialog() })
 
         is SettingDialogState.Licenses -> OpenSourceLicensesScreen(onBack = { closeDialog() })
+
+        // =========================================================================
+        // ★修正: 連携解除の処理 (onDeleteKey) を追加
+        // =========================================================================
+        is SettingDialogState.GeminiSetup -> {
+            val localIp by viewModel.localIpAddress.collectAsState()
+            GeminiSetupDialog(
+                currentKey = prefs.geminiApiKey,
+                serverIp = localIp,
+                onStartServer = { viewModel.startGeminiLocalServer() },
+                onStopServer = { viewModel.stopGeminiLocalServer() },
+                onDismiss = { closeDialog() },
+                onManualInputClick = {
+                    viewModel.stopGeminiLocalServer()
+                    uiState.activeDialog = SettingDialogState.Input(
+                        "Gemini API Key",
+                        prefs.geminiApiKey
+                    ) { key ->
+                        scope.launch {
+                            repository.saveString(SettingsRepository.GEMINI_API_KEY, key)
+                        }
+                    }
+                },
+                // ★ 追加: 空文字で上書き保存してキーを削除する
+                onDeleteKey = {
+                    viewModel.stopGeminiLocalServer()
+                    scope.launch {
+                        repository.saveString(SettingsRepository.GEMINI_API_KEY, "")
+                    }
+                    closeDialog()
+                }
+            )
+        }
+
         else -> {}
     }
 }

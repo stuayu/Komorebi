@@ -181,5 +181,11 @@ dependencies {
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
+    // Gemini
     implementation("com.google.ai.client.generativeai:generativeai:0.7.0")
+
+    // --- Ktor Local Server & QR Code ---
+    implementation("io.ktor:ktor-server-core:2.3.8")
+    implementation("io.ktor:ktor-server-cio:2.3.8")
+    implementation("com.google.zxing:core:3.5.3")
 }

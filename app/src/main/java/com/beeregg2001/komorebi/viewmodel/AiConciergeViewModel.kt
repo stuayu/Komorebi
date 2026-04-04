@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.beeregg2001.komorebi.data.SettingsRepository
 import com.beeregg2001.komorebi.data.model.Channel
 import com.beeregg2001.komorebi.data.model.RecordedProgram
 import com.beeregg2001.komorebi.data.model.ReserveItem
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -28,7 +30,6 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 import javax.inject.Inject
 
-// （ファイル上部のAction定義に追加）
 sealed class AiConciergeAction {
     data class PlayLive(val channelId: String) : AiConciergeAction()
     data class PlayRecorded(val videoId: Int) : AiConciergeAction()
@@ -68,7 +69,9 @@ data class AiContextData(
 )
 
 @HiltViewModel
-class AiConciergeViewModel @Inject constructor() : ViewModel() {
+class AiConciergeViewModel @Inject constructor(
+    private val settingsRepository: SettingsRepository
+) : ViewModel() {
 
     private val _internalChatHistory = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatHistory: StateFlow<List<ChatMessage>> = _internalChatHistory
@@ -79,38 +82,39 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
     val pendingAction = _pendingAction.asSharedFlow()
 
     private var lastContextData: AiContextData? = null
-    private val apiKey = "YOUR_API_KEYS"
 
-    // =========================================================================
-    // ★ 修正: 雑談・一般知識への対応力を追加し、余計なタグ出力を封印！
-    // =========================================================================
-    private val generativeModel = GenerativeModel(
-        modelName = "gemini-3.1-flash-lite-preview",
-        apiKey = apiKey,
-        systemInstruction = content {
-            text(
-                "あなたはTVアプリ「Komorebi」のAIコンシェルジュです。\n" +
-                        "ユーザーの意図を汲み取り、アプリの操作が必要な場合のみ【特殊コマンドタグ】を出力します。\n\n" +
-                        "【重要: 回答の簡潔さ】\n" +
-                        "録画リストや番組一覧などを聞かれた場合、コンテキストにある全ての番組を回答すると長すぎるため、代表的な3〜5件のみを抜粋して答えてください。\n\n" +
-                        "【重要: 一般知識や雑談への対応】\n" +
-                        "テレビ番組とは関係のない質問（楽曲情報、トリビア等）をされた場合、番組表にないことを謝罪せず、明るく簡潔に教えてあげてください。絶対にタグを出力してはいけません。\n\n" +
-                        "【アプリ操作が必要な場合のタグ一覧】\n" +
-                        "再生:\n" +
-                        "・[PLAY_LIVE: LIVE_ID]\n" +
-                        "・[PLAY_REC: REC_ID]\n\n" +
-                        "番組検索・予約 (必ず [タグ名: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名] の形式。不要項目は空白にする):\n" +
-                        "1. 検索結果を画面で見たい場合\n" +
-                        "   ・[SEARCH_EPG: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名]\n" +
-                        "   ※例：「明日の日テレのバラエティ」→ [SEARCH_EPG: | バラエティ | 2026/04/03 | false | 日テレ]\n" +
-                        "2. 録画予約したい場合 (裏側で検索)\n" +
-                        "   ・[REQ_EPG_SEARCH: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名]\n" +
-                        "3. 予約の確定 (REQ_EPG_SEARCHの検索結果を受け取った後)\n" +
-                        "   ・[RESERVE_SINGLE: PROGRAM_ID]\n" +
-                        "   ・[RESERVE_AUTO: キーワード]"
-            )
-        }
-    )
+    private fun getGenerativeModel(apiKey: String): GenerativeModel {
+        return GenerativeModel(
+            modelName = "gemini-3.1-flash-lite",
+            apiKey = apiKey,
+            systemInstruction = content {
+                text(
+                    "あなたはTVアプリ「Komorebi」の優秀で親しみやすいAIコンシェルジュです。\n" +
+                            "ユーザーの意図を汲み取り、アプリの操作が必要な場合のみ【特殊コマンドタグ】を出力します。\n\n" +
+                            "【重要: 回答の簡潔さ】\n" +
+                            "録画リストや番組一覧などを聞かれた場合、コンテキストにある全ての番組を回答すると長すぎるため、代表的な3〜5件のみを抜粋して答えてください。\n\n" +
+                            "【重要: 一般知識や雑談への対応（愛嬌と万能さ）】\n" +
+                            "テレビ番組とは直接関係のない一般的な質問（楽曲情報、トリビア、天気、日常会話など）をされた場合、番組表にないことを謝罪する必要はありません。\n" +
+                            "あなたは博識なアシスタントとして、その質問の答えを直接、明るく簡潔に教えてあげてください。\n\n" +
+                            "【重要: タグを出力しないケース】\n" +
+                            "「録画リストを教えて」「この番組について教えて」といった情報提供や、上記の「一般知識・雑談」など、画面遷移や再生・予約操作が不要な場合は、**例文であっても絶対にタグを出力しないでください**。\n\n" +
+                            "【アプリ操作が必要な場合のタグ一覧】\n" +
+                            "再生:\n" +
+                            "・[PLAY_LIVE: LIVE_ID]\n" +
+                            "・[PLAY_REC: REC_ID]\n\n" +
+                            "番組検索・予約 (必ず [タグ名: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名] の形式。不要項目は空白にする):\n" +
+                            "1. 検索結果を画面で見たい場合\n" +
+                            "   ・[SEARCH_EPG: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名]\n" +
+                            "   ※例：「明日の日テレのバラエティ」→ [SEARCH_EPG:  | バラエティ | 2026/04/03 | false | 日テレ]\n" +
+                            "2. 録画予約したい場合 (裏側で検索)\n" +
+                            "   ・[REQ_EPG_SEARCH: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名]\n" +
+                            "3. 予約の確定 (REQ_EPG_SEARCHの検索結果を受け取った後)\n" +
+                            "   ・[RESERVE_SINGLE: PROGRAM_ID]\n" +
+                            "   ・[RESERVE_AUTO: キーワード]"
+                )
+            }
+        )
+    }
 
     @RequiresApi(Build.VERSION_CODES.O)
     fun sendTextWithContext(
@@ -129,6 +133,17 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
             _internalChatHistory.value = _internalChatHistory.value + userMsg + aiThinkingMsg
 
             try {
+                // ★ 修正: trim() を使って見えない空白や改行を削除し、ログに出力
+                val rawApiKey = settingsRepository.geminiApiKey.first()
+                val currentApiKey = rawApiKey.trim()
+                Log.i(
+                    "AI_Concierge",
+                    "🔑 使用APIキー: [${currentApiKey}] (長さ: ${currentApiKey.length}) ※生データ長: ${rawApiKey.length}"
+                )
+
+                if (currentApiKey.isBlank()) throw IllegalStateException("APIキーが設定されていません")
+
+                val generativeModel = getGenerativeModel(currentApiKey)
                 val contextPrompt = withContext(Dispatchers.Default) {
                     buildContextPrompt(
                         liveChannels,
@@ -164,6 +179,17 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
             _internalChatHistory.value = _internalChatHistory.value + userMsg + aiThinkingMsg
 
             try {
+                // ★ 修正: trim() を使って見えない空白や改行を削除し、ログに出力
+                val rawApiKey = settingsRepository.geminiApiKey.first()
+                val currentApiKey = rawApiKey.trim()
+                Log.i(
+                    "AI_Concierge",
+                    "🔑 使用APIキー: [${currentApiKey}] (長さ: ${currentApiKey.length}) ※生データ長: ${rawApiKey.length}"
+                )
+
+                if (currentApiKey.isBlank()) throw IllegalStateException("APIキーが設定されていません")
+
+                val generativeModel = getGenerativeModel(currentApiKey)
                 val contextPrompt = withContext(Dispatchers.Default) {
                     buildContextPrompt(
                         liveChannels,
@@ -187,7 +213,7 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
     fun submitSilentSearchResult(keyword: String, results: List<UiSearchResultItem>) {
         viewModelScope.launch {
             val searchResultText = if (results.isEmpty()) {
-                "システム: 条件に一致する検索結果は0件でした。謝罪するか、条件を緩めて再検索（[REQ_EPG_SEARCH: 別の単語 | | | false]）してください。"
+                "システム: 条件に一致する検索結果は0件でした。謝罪するか、条件を緩めて再検索（[REQ_EPG_SEARCH: 別の単語 | | | false | ]）してください。"
             } else {
                 val sb = java.lang.StringBuilder("システム: 検索結果は以下の通りです。\n")
                 results.take(5).forEach { res ->
@@ -207,6 +233,17 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
             _internalChatHistory.value = _internalChatHistory.value + aiThinkingMsg
 
             try {
+                // ★ 修正: trim() を使って見えない空白や改行を削除し、ログに出力
+                val rawApiKey = settingsRepository.geminiApiKey.first()
+                val currentApiKey = rawApiKey.trim()
+                Log.i(
+                    "AI_Concierge",
+                    "🔑 使用APIキー: [${currentApiKey}] (長さ: ${currentApiKey.length}) ※生データ長: ${rawApiKey.length}"
+                )
+
+                if (currentApiKey.isBlank()) throw IllegalStateException("APIキーが設定されていません")
+
+                val generativeModel = getGenerativeModel(currentApiKey)
                 val historyText = buildHistoryText()
                 val contextData = lastContextData
                 val contextPrompt = if (contextData != null) {
@@ -267,9 +304,9 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
 
         Log.i(
             "AI_Concierge", "🧩 Parsed Tags -> " +
-                    "Live:${liveMatch?.groupValues}, Rec:${recMatch?.groupValues}, " +
-                    "Search:${searchMatch?.groupValues}, ReqSearch:${reqSearchMatch?.groupValues}, " +
-                    "ResSingle:${resSingleMatches.map { it.groupValues[1] }}, ResAuto:${resAutoMatch?.groupValues}"
+                "Live:${liveMatch?.groupValues}, Rec:${recMatch?.groupValues}, " +
+                "Search:${searchMatch?.groupValues}, ReqSearch:${reqSearchMatch?.groupValues}, " +
+                "ResSingle:${resSingleMatches.map { it.groupValues[1] }}, ResAuto:${resAutoMatch?.groupValues}"
         )
 
         listOf(
@@ -313,14 +350,13 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
                 AiConciergeAction.PlayRecorded(id)
             )
             }
-            // （handleAiResponse内のパース処理を5枠に対応）
         } else if (searchMatch != null) {
             val parts = searchMatch.groupValues[1].split("|").map { it.trim() }
             val kw = parts.getOrNull(0) ?: ""
             val gen = parts.getOrNull(1) ?: ""
             val date = parts.getOrNull(2) ?: ""
             val isLive = parts.getOrNull(3)?.toBooleanStrictOrNull() ?: false
-            val channel = parts.getOrNull(4) ?: "" // ★追加
+            val channel = parts.getOrNull(4) ?: ""
             viewModelScope.launch {
                 delay(displayDelayMs); _pendingAction.emit(
                 AiConciergeAction.SearchEpg(
@@ -338,7 +374,7 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
             val gen = parts.getOrNull(1) ?: ""
             val date = parts.getOrNull(2) ?: ""
             val isLive = parts.getOrNull(3)?.toBooleanStrictOrNull() ?: false
-            val channel = parts.getOrNull(4) ?: "" // ★追加
+            val channel = parts.getOrNull(4) ?: ""
             _pendingAction.emit(AiConciergeAction.ReqEpgSearch(kw, gen, date, isLive, channel))
         } else if (resSingleMatches.isNotEmpty()) {
             viewModelScope.launch {
@@ -368,6 +404,12 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
                 ignoreCase = true
             ) == true -> "【タイムアウト】Geminiサーバーからの応答がありません。"
 
+            e.message?.contains(
+                "API key not valid",
+                ignoreCase = true
+            ) == true -> "【認証エラー】APIキーが間違っています。設定画面を開いて登録し直してください。"
+
+            e.message?.contains("APIキーが設定されていません") == true -> "【未設定】設定画面の「AIコンシェルジュ (Gemini)」からAPIキーを登録してください。"
             else -> "通信エラーが発生しました: ${e.localizedMessage}"
         }
         _internalChatHistory.value = _internalChatHistory.value.map {
