@@ -79,7 +79,7 @@ class AiConciergeViewModel @Inject constructor() : ViewModel() {
     val pendingAction = _pendingAction.asSharedFlow()
 
     private var lastContextData: AiContextData? = null
-    private val apiKey = "AIzaSyCN20Yfe4i8uxuYuJ0rUFmQxGrYMWic_SA"
+    private val apiKey = "YOUR_API_KEYS"
 
     // =========================================================================
     // ★ 修正: 雑談・一般知識への対応力を追加し、余計なタグ出力を封印！
