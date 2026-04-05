@@ -68,16 +68,18 @@ fun AiConciergePanel(
 
     val defaultRequester = if (isSpeechSupported) micFocusRequester else keyboardFocusRequester
 
+    // パネルが開いて、かつ履歴がある（2回目以降）の時の即時フォーカス復帰
     LaunchedEffect(isOpen) {
         if (isOpen && chatHistory.isNotEmpty()) {
-            delay(300); runCatching { defaultRequester.requestFocus() }
+            delay(150); defaultRequester.safeRequestFocusWithRetry("AiPanel_Open")
         }
     }
 
-    // ★ 修正: chatHistory.isNotEmpty() の条件を削除し、履歴が空でも絶対にフォーカスを戻す！
+    // ★ 修正: MainRootScreenからチケット（司令）が飛んできた時の確実な処理
     LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime, isOpen) {
         if (isOpen && ticketManager.currentTicket == AiFocusTicket.PANEL_DEFAULT) {
             delay(150)
+            // 挨拶のタイピング中でなければ、指示通りフォーカスを戻す
             if (!isGreetingTyping) {
                 defaultRequester.safeRequestFocusWithRetry("AiPanelDefault")
             }
@@ -116,9 +118,8 @@ fun AiConciergePanel(
                     .background(
                         brush = Brush.horizontalGradient(
                             colors = listOf(
-                                colors.background.copy(
-                                    alpha = 0.85f
-                                ), colors.background.copy(alpha = 0.98f)
+                                colors.background.copy(alpha = 0.85f),
+                                colors.background.copy(alpha = 0.98f)
                             )
                         )
                     )
@@ -170,7 +171,8 @@ fun AiConciergePanel(
                                                     scrollState.animateScrollTo(
                                                         scrollState.value - 400
                                                     )
-                                                }; return@onKeyEvent true
+                                                }
+                                                return@onKeyEvent true
                                             }
                                         }
 
@@ -180,9 +182,11 @@ fun AiConciergePanel(
                                                     scrollState.animateScrollTo(
                                                         scrollState.value + 400
                                                     )
-                                                }; return@onKeyEvent true
+                                                }
+                                                return@onKeyEvent true
                                             } else {
-                                                runCatching { defaultRequester.requestFocus() }; return@onKeyEvent true
+                                                runCatching { defaultRequester.requestFocus() }
+                                                return@onKeyEvent true
                                             }
                                         }
                                     }
@@ -217,11 +221,13 @@ fun AiConciergePanel(
                                             delay(800)
                                             isGreetingTyping = false
 
-                                            // ★ 修正: キーボードを開く直前に、確実にボタンにフォーカスを当てておく
-                                            runCatching { defaultRequester.requestFocus() }
-
+                                            // ★ 修正: 余計なフォーカスリクエスト（デッドロックの原因）を全削除！
+                                            // エミュレータ（マイク非対応）の場合のみ、純粋にキーボードクリックのイベントを発火させる
                                             if (!isSpeechSupported) {
                                                 onKeyboardClick()
+                                            } else {
+                                                // マイク対応端末は、何もしない（チケット処理に任せる）だけで自然にフォーカスが当たる
+                                                defaultRequester.safeRequestFocusWithRetry("Greeting_Finish_Fallback")
                                             }
                                         }
                                     }
@@ -416,9 +422,8 @@ fun AiConciergePanel(
                                 },
                             shape = ClickableSurfaceDefaults.shape(CircleShape),
                             colors = ClickableSurfaceDefaults.colors(
-                                containerColor = colors.textPrimary.copy(
-                                    alpha = 0.1f
-                                ), focusedContainerColor = colors.textPrimary
+                                containerColor = colors.textPrimary.copy(alpha = 0.1f),
+                                focusedContainerColor = colors.textPrimary
                             ),
                             scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f)
                         ) {

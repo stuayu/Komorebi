@@ -21,7 +21,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties // ★ 追加
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -381,7 +380,6 @@ fun MainRootScreen(
                 state.isAiConciergeOpen = false
                 state.isReturningFromPlayer = true
                 epgViewModel.triggerRestore()
-                // ★ 【Phase 1 修正】AI検索のターゲット状態をリセットし、番組表のジャンプバグを防ぐ
                 epgViewModel.clearSearch()
                 aiConciergeViewModel.resetState()
             }
@@ -468,7 +466,13 @@ fun MainRootScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                // ★ 修正: onPreviewKeyEvent で AIパネルが開いている時のキー操作をブロックする
                 .onPreviewKeyEvent { event ->
+                    if (state.isAiConciergeOpen || state.showAiKeyboardInput) {
+                        // AIパネルが開いている時は、裏画面のキーイベントをすべて無視（飲み込む）
+                        return@onPreviewKeyEvent false
+                    }
+
                     val isCenterKey =
                         event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter
 
@@ -478,8 +482,6 @@ fun MainRootScreen(
                             return@onPreviewKeyEvent true
                         }
                     }
-
-                    if (state.isAiConciergeOpen) return@onPreviewKeyEvent false
 
                     if (isCenterKey && event.type == KeyEventType.KeyDown) {
                         if ((event.nativeKeyEvent.isLongPress || event.nativeKeyEvent.repeatCount > 0) && !isLongPressHandled) {
@@ -507,14 +509,8 @@ fun MainRootScreen(
                 isSystemReady && isSettingsInitialized && !state.showConnectionErrorDialog && !isSyncingInitial
 
             if (showMainContent) {
-                // ★ 【Phase 1 修正】AIパネル操作中は裏画面のフォーカスを完全に無効化する
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .focusProperties {
-                            canFocus = !state.isAiConciergeOpen && !state.showAiKeyboardInput
-                        }
-                ) {
+                // ★ 修正: focusProperties による全体ブロックを解除し、自然なフォーカス移動を復活
+                Box(modifier = Modifier.fillMaxSize()) {
                     when {
                         state.selectedChannel != null -> {
                             LivePlayerScreen(
@@ -1052,7 +1048,6 @@ fun MainRootScreen(
                     state.isAiConciergeOpen = false
                     state.isReturningFromPlayer = true
                     epgViewModel.triggerRestore()
-                    // ★ 【Phase 1 修正】AI検索後のターゲット状態をリセット
                     epgViewModel.clearSearch()
                     aiConciergeViewModel.resetState()
                 },
@@ -1076,7 +1071,7 @@ fun MainRootScreen(
                 AiTextInputDialog(
                     onSubmit = { text ->
                         state.showAiKeyboardInput = false
-                        // ★ 【Phase 1 修正】文字入力ダイアログが閉じた後、確実にフォーカスをAIパネルに戻す
+                        // ダイアログが閉じた後、フォーカスをAIパネルの入力ボタンに戻す
                         scope.launch {
                             delay(150)
                             aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
@@ -1093,7 +1088,7 @@ fun MainRootScreen(
                     },
                     onDismiss = {
                         state.showAiKeyboardInput = false
-                        // ★ 【Phase 1 修正】キャンセルして閉じた場合も、確実にフォーカスをAIパネルに戻す
+                        // ダイアログキャンセル時もフォーカスを戻す
                         scope.launch {
                             delay(150)
                             aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
