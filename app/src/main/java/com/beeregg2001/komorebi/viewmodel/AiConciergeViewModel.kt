@@ -114,8 +114,7 @@ class AiConciergeViewModel @Inject constructor(
                             "2. 録画予約したい場合、またはコンテキストに無いジャンルの現在放送中番組を探したい場合 (裏側で検索)\n" +
                             "   ・[REQ_EPG_SEARCH: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名]\n" +
                             "3. 予約の確定 (REQ_EPG_SEARCHの検索結果を受け取った後)\n" +
-                            "   ・[RESERVE_SINGLE: PROGRAM_ID]\n" +
-                            "   ・[RESERVE_AUTO: キーワード]"
+                            "   ・[RESERVE_SINGLE: PROGRAM_ID]\n"
                 )
             }
         )
@@ -291,20 +290,20 @@ class AiConciergeViewModel @Inject constructor(
         val searchRegex = Regex("""\[SEARCH_EPG:\s*([^\]]+)\]""")
         val reqSearchRegex = Regex("""\[REQ_EPG_SEARCH:\s*([^\]]+)\]""")
         val resSingleRegex = Regex("""\[RESERVE_SINGLE:\s*([^\]\s]+).*?\]""")
-        val resAutoRegex = Regex("""\[RESERVE_AUTO:\s*([^\]\|]+).*?\]""")
+//        val resAutoRegex = Regex("""\[RESERVE_AUTO:\s*([^\]\|]+).*?\]""")
 
         val liveMatch = liveRegex.find(responseText)
         val recMatch = recRegex.find(responseText)
         val searchMatch = searchRegex.find(responseText)
         val reqSearchMatch = reqSearchRegex.find(responseText)
         val resSingleMatches = resSingleRegex.findAll(responseText).toList()
-        val resAutoMatch = resAutoRegex.find(responseText)
+//        val resAutoMatch = resAutoRegex.find(responseText)
 
         Log.i(
             "AI_Concierge", "🧩 Parsed Tags -> " +
                     "Live:${liveMatch?.groupValues}, Rec:${recMatch?.groupValues}, " +
                     "Search:${searchMatch?.groupValues}, ReqSearch:${reqSearchMatch?.groupValues}, " +
-                    "ResSingle:${resSingleMatches.map { it.groupValues[1] }}, ResAuto:${resAutoMatch?.groupValues}"
+                    "ResSingle:${resSingleMatches.map { it.groupValues[1] }}"
         )
 
         listOf(
@@ -313,7 +312,7 @@ class AiConciergeViewModel @Inject constructor(
             searchRegex,
             reqSearchRegex,
             resSingleRegex,
-            resAutoRegex
+//            resAutoRegex
         ).forEach { regex ->
             responseText = responseText.replace(regex, "").trim()
         }
@@ -322,7 +321,7 @@ class AiConciergeViewModel @Inject constructor(
             "はい、再生を開始します！"
         else if (responseText.isBlank() && searchMatch != null) responseText =
             "はい、番組表を検索します！"
-        else if (responseText.isBlank() && (resSingleMatches.isNotEmpty() || resAutoMatch != null)) responseText =
+        else if (responseText.isBlank() && (resSingleMatches.isNotEmpty())) responseText =
             "はい、予約を登録しました！"
         else if (responseText.isBlank() && reqSearchMatch == null) responseText =
             "すみません、うまく処理できませんでした。"
@@ -382,14 +381,14 @@ class AiConciergeViewModel @Inject constructor(
                     _pendingAction.emit(AiConciergeAction.ReserveSingle(id))
                 }
             }
-        } else if (resAutoMatch != null) {
-            viewModelScope.launch {
-                delay(displayDelayMs); _pendingAction.emit(
-                AiConciergeAction.ReserveAuto(
-                    resAutoMatch.groupValues[1].trim()
-                )
-            )
-            }
+//        } else if (resAutoMatch != null) {
+//            viewModelScope.launch {
+//                delay(displayDelayMs); _pendingAction.emit(
+//                AiConciergeAction.ReserveAuto(
+//                    resAutoMatch.groupValues[1].trim()
+//                )
+//            )
+//            }
         }
     }
 
