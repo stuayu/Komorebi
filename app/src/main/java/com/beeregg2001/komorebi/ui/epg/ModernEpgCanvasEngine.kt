@@ -71,7 +71,8 @@ fun ModernEpgCanvasEngine_Smooth(
     onUpdateTargetTime: (OffsetDateTime) -> Unit,
     onRequestJumpToNow: () -> Unit,
     searchButtonFocusRequester: FocusRequester,
-    onSearchClick: () -> Unit
+    onSearchClick: () -> Unit,
+    timeFormat: String // ★ 追加: timeFormat を受け取る
 ) {
     // ==========================================
     // 1. 初期化とリソースの準備
@@ -406,7 +407,8 @@ fun ModernEpgCanvasEngine_Smooth(
                                         logoPainters = logoPainters,
                                         isGridFocused = isContentFocused || epgState.hasData,
                                         reserveMap = reserveMap,
-                                        clockPainter = clockPainter
+                                        clockPainter = clockPainter,
+                                        timeFormat = timeFormat
                                     )
                                     hasRenderedFirstFrame = true
                                 }

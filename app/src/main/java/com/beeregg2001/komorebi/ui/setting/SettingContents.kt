@@ -440,6 +440,7 @@ fun DisplaySettingsContent(
     onEditTab: () -> Unit,
     onEditStartupChannel: () -> Unit,
     onEditDefaultView: () -> Unit,
+    onEditTimeFormat: () -> Unit, // ★ 追加
     itemRs: List<FocusRequester>,
     onClick: (FocusRequester) -> Unit
 ) {
@@ -480,6 +481,16 @@ fun DisplaySettingsContent(
                     .focusRequester(itemRs[2])
                     .focusProperties { left = sidebarR },
                 onClick = { onClick(itemRs[2]); onEditDefaultView() })
+
+            // ★ 追加: 時刻の表示形式
+            SettingItem(
+                "時刻の表示形式",
+                if (preferences.timeFormat == "12H") "12時間表記 (AM/PM)" else "24時間表記",
+                Icons.Default.Schedule,
+                modifier = Modifier
+                    .focusRequester(itemRs[3])
+                    .focusProperties { left = sidebarR },
+                onClick = { onClick(itemRs[3]); onEditTimeFormat() })
         }
     }
 }
@@ -566,7 +577,6 @@ fun CommentSettingsContent(
     }
 }
 
-// ★ 修正: 不要な引数（cmdRやenableAiRなど）を完全に削除しました
 @Composable
 fun LabSettingsContent(
     apiKey: String,

@@ -113,14 +113,9 @@ fun LivePlayerScreen(
 
     val ps = rememberLivePlayerState(context, initialQuality)
 
-    // ViewModel側で監視している2種類のリストを受け取る
     val groupedChannels by channelViewModel.groupedChannels.collectAsState()
     val baseballGroupedChannels by channelViewModel.baseballGroupedChannels.collectAsState()
 
-    // ==========================================
-    // 🌟 修正: プロ野球特化モードのリスト切り替え（ViewModelへ処理を委譲し超軽量化）
-    // UIは計算を一切行わず、状態に応じてどちらのリストを使うかを選ぶだけ！
-    // ==========================================
     val displayGroupedChannels =
         remember(groupedChannels, baseballGroupedChannels, isBaseballMode) {
             if (isBaseballMode) baseballGroupedChannels else groupedChannels
@@ -131,7 +126,6 @@ fun LivePlayerScreen(
     val currentChannelItem by remember(channel.id, displayGroupedChannels) {
         derivedStateOf { displayFlatChannels.find { it.id == channel.id } ?: channel }
     }
-    // ==========================================
 
     val commentSpeedStr by settingsViewModel.commentSpeed.collectAsState()
     val commentFontSizeStr by settingsViewModel.commentFontSize.collectAsState()
@@ -193,9 +187,6 @@ fun LivePlayerScreen(
     val scrollState = rememberScrollState()
     val nativeLib = remember { NativeLib() }
 
-    // ==========================================
-    // メインプレイヤーの構築
-    // ==========================================
     var videoWidth by remember { mutableIntStateOf(0) }
     var videoHeight by remember { mutableIntStateOf(0) }
     var pixelWidthHeightRatio by remember { mutableFloatStateOf(1f) }
@@ -316,9 +307,6 @@ fun LivePlayerScreen(
                 }
         }
 
-    // ==========================================
-    // サブプレイヤーの構築 (二画面用・遅延生成)
-    // ==========================================
     var dualVideoWidth by remember { mutableIntStateOf(0) }
     var dualVideoHeight by remember { mutableIntStateOf(0) }
     var dualPixelWidthHeightRatio by remember { mutableFloatStateOf(1f) }
@@ -418,10 +406,6 @@ fun LivePlayerScreen(
     DisposableEffect(dualExoPlayer) {
         onDispose { dualExoPlayer?.release() }
     }
-
-    // ==========================================
-    // バックグラウンド・非同期処理 (Side Effects)
-    // ==========================================
 
     LaunchedEffect(ps.isDualDisplayMode, ps.activeDualPlayerIndex, exoPlayer, dualExoPlayer) {
         if (ps.isDualDisplayMode) {
@@ -706,7 +690,10 @@ fun LivePlayerScreen(
                 runCatching {
                     val json = JSONObject(data)
                     ps.sseStatus = json.optString("status", "Unknown")
-                    ps.sseDetail = json.optString("detail", AppStrings.STATUS_LOADING)
+
+                    // ★ 修正: 「ライブストリームはOnAirです。」が含まれていたら空文字にしてローディング画面を消す
+                    val detailMsg = json.optString("detail", AppStrings.STATUS_LOADING)
+                    ps.sseDetail = if (detailMsg.contains("OnAirです")) "" else detailMsg
 
                     if (ps.sseStatus == "Error" || (ps.sseStatus == "Offline" && (ps.sseDetail.contains(
                             "失敗"
@@ -1003,7 +990,8 @@ fun LivePlayerScreen(
             }
         }
 
-        androidx.compose.animation.AnimatedVisibility(visible = !ps.isDualDisplayMode && ps.currentStreamSource == StreamSource.KONOMITV && (ps.sseStatus == "Standby" || ps.sseStatus == "Offline") && ps.playerError == null) {
+        // ★ 修正: sseDetail が空文字ではない時のみローディング画面を表示する
+        androidx.compose.animation.AnimatedVisibility(visible = !ps.isDualDisplayMode && ps.currentStreamSource == StreamSource.KONOMITV && (ps.sseStatus == "Standby" || ps.sseStatus == "Offline") && ps.playerError == null && ps.sseDetail.isNotEmpty()) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -1124,7 +1112,6 @@ fun LivePlayerScreen(
                     }
                 },
                 onSwapScreens = {
-                    // ★ 追加: Stateから持ってきた左右スワップロジック
                     if (ps.isDualDisplayMode && ps.dualRightChannel != null) {
                         val oldLeft = currentChannelItem
                         val oldRight = ps.dualRightChannel!!

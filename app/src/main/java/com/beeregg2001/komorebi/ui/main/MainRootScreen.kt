@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties // ★ 追加
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -119,7 +120,7 @@ fun MainRootScreen(
             when (action) {
                 is AiConciergeAction.PlayLive -> {
                     state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    aiConciergeViewModel.resetState()
                     val target = channelViewModel.groupedChannels.value.values.flatten()
                         .find { it.id == action.channelId }
                     if (target != null) {
@@ -138,7 +139,7 @@ fun MainRootScreen(
 
                 is AiConciergeAction.PlayRecorded -> {
                     state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    aiConciergeViewModel.resetState()
                     val target =
                         recordViewModel.recentRecordings.value.find { it.id == action.videoId }
                     if (target != null) {
@@ -156,12 +157,10 @@ fun MainRootScreen(
                     }
                 }
 
-                // 作戦A: UI連動の検索（検索結果画面を開く）
                 is AiConciergeAction.SearchEpg -> {
                     state.isAiConciergeOpen = false
                     aiConciergeViewModel.resetState()
 
-                    // ★ チャンネル名も空である場合のみ、ジャンプとみなす
                     val isOnlyDate =
                         action.keyword.isBlank() && action.genre.isBlank() && action.date.isNotBlank() && !action.isLiveOnly && action.channelName.isBlank()
 
@@ -182,7 +181,6 @@ fun MainRootScreen(
                             state.toastMessage = "日付の指定が正しくありません"
                         }
                     } else {
-                        // チャンネル名を5つ目の引数として渡す
                         epgViewModel.executeSearch(
                             action.keyword,
                             action.genre,
@@ -196,10 +194,8 @@ fun MainRootScreen(
                     }
                 }
 
-                // 作戦B-前半: 内部ループ用サイレント検索
                 is AiConciergeAction.ReqEpgSearch -> {
                     scope.launch {
-                        // チャンネル名を5つ目の引数として渡す
                         val results = epgViewModel.searchSilently(
                             action.keyword,
                             action.genre,
@@ -213,7 +209,7 @@ fun MainRootScreen(
 
                 is AiConciergeAction.ReserveSingle -> {
                     state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    aiConciergeViewModel.resetState()
                     reserveViewModel.addReserve(action.programId) {
                         state.toastMessage = "番組の録画予約を完了しました"
                     }
@@ -221,7 +217,7 @@ fun MainRootScreen(
 
                 is AiConciergeAction.ReserveAuto -> {
                     state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState() // ★ 履歴リセット追加
+                    aiConciergeViewModel.resetState()
                     reserveViewModel.addEpgReserve(
                         keyword = action.keyword,
                         networkId = 0,
@@ -385,6 +381,8 @@ fun MainRootScreen(
                 state.isAiConciergeOpen = false
                 state.isReturningFromPlayer = true
                 epgViewModel.triggerRestore()
+                // ★ 【Phase 1 修正】AI検索のターゲット状態をリセットし、番組表のジャンプバグを防ぐ
+                epgViewModel.clearSearch()
                 aiConciergeViewModel.resetState()
             }
 
@@ -474,7 +472,6 @@ fun MainRootScreen(
                     val isCenterKey =
                         event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter
 
-                    // ★ 修正: KeyUpの時はパネルの状態に関わらず「必ず」長押しフラグをリセットする！
                     if (isCenterKey && event.type == KeyEventType.KeyUp) {
                         if (isLongPressHandled) {
                             isLongPressHandled = false
@@ -482,10 +479,8 @@ fun MainRootScreen(
                         }
                     }
 
-                    // パネルが開いている間は、以降のキーイベントの横取り（KeyDown等）をしない
                     if (state.isAiConciergeOpen) return@onPreviewKeyEvent false
 
-                    // パネルが閉じている時の KeyDown 処理（長押しの検知）
                     if (isCenterKey && event.type == KeyEventType.KeyDown) {
                         if ((event.nativeKeyEvent.isLongPress || event.nativeKeyEvent.repeatCount > 0) && !isLongPressHandled) {
                             isLongPressHandled = true
@@ -512,7 +507,14 @@ fun MainRootScreen(
                 isSystemReady && isSettingsInitialized && !state.showConnectionErrorDialog && !isSyncingInitial
 
             if (showMainContent) {
-                Box(modifier = Modifier.fillMaxSize()) {
+                // ★ 【Phase 1 修正】AIパネル操作中は裏画面のフォーカスを完全に無効化する
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusProperties {
+                            canFocus = !state.isAiConciergeOpen && !state.showAiKeyboardInput
+                        }
+                ) {
                     when {
                         state.selectedChannel != null -> {
                             LivePlayerScreen(
@@ -744,7 +746,8 @@ fun MainRootScreen(
                                 onShowSeriesList = { state.isSeriesListOpen = true },
                                 isReturningFromPlayer = state.isReturningFromPlayer,
                                 onReturnFocusConsumed = { state.isReturningFromPlayer = false },
-                                isUiReadyFlag = state.isUiReady
+                                isUiReadyFlag = state.isUiReady,
+                                settingsViewModel = settingsViewModel
                             )
                         }
                     }
@@ -1049,6 +1052,8 @@ fun MainRootScreen(
                     state.isAiConciergeOpen = false
                     state.isReturningFromPlayer = true
                     epgViewModel.triggerRestore()
+                    // ★ 【Phase 1 修正】AI検索後のターゲット状態をリセット
+                    epgViewModel.clearSearch()
                     aiConciergeViewModel.resetState()
                 },
                 onMicLongPressStart = {
@@ -1071,8 +1076,9 @@ fun MainRootScreen(
                 AiTextInputDialog(
                     onSubmit = { text ->
                         state.showAiKeyboardInput = false
+                        // ★ 【Phase 1 修正】文字入力ダイアログが閉じた後、確実にフォーカスをAIパネルに戻す
                         scope.launch {
-                            delay(300)
+                            delay(150)
                             aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
                         }
                         if (text.isNotBlank()) {
@@ -1087,8 +1093,9 @@ fun MainRootScreen(
                     },
                     onDismiss = {
                         state.showAiKeyboardInput = false
+                        // ★ 【Phase 1 修正】キャンセルして閉じた場合も、確実にフォーカスをAIパネルに戻す
                         scope.launch {
-                            delay(300)
+                            delay(150)
                             aiTicketManager.issue(AiFocusTicket.PANEL_DEFAULT)
                         }
                     }

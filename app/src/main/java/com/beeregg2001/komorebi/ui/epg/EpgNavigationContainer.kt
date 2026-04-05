@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.tv.material3.*
 import com.beeregg2001.komorebi.common.safeRequestFocus
 import com.beeregg2001.komorebi.data.model.EpgProgram
@@ -53,6 +54,7 @@ import com.beeregg2001.komorebi.viewmodel.EpgUiState
 import com.beeregg2001.komorebi.viewmodel.UiSearchResultItem
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import com.beeregg2001.komorebi.ui.video.components.RecordSearchHistoryDropdown
+import com.beeregg2001.komorebi.viewmodel.SettingsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
@@ -70,6 +72,7 @@ fun EpgNavigationContainer(
     isJumpMenuOpen: Boolean,
     onJumpMenuStateChanged: (Boolean) -> Unit,
     onNavigateToPlayer: (String, String, String) -> Unit,
+    settingsViewModel: SettingsViewModel = hiltViewModel(), // ★ ViewModelを取得
     currentType: String,
     onTypeChanged: (String) -> Unit,
     restoreChannelId: String?,
@@ -88,6 +91,8 @@ fun EpgNavigationContainer(
 ) {
     val scope = rememberCoroutineScope()
     val colors = KomorebiTheme.colors
+
+    val timeFormat by settingsViewModel.timeFormat.collectAsState()
 
     var isInternalJumping by remember { mutableStateOf(false) }
 
@@ -250,7 +255,8 @@ fun EpgNavigationContainer(
                             gridFocusRequester.safeRequestFocus("EpgNav_JumpNow")
                             isInternalJumping = false
                         }
-                    }
+                    },
+                    timeFormat = timeFormat
                 )
             } else {
                 BackHandler(enabled = true) { handleBackFromSearchResults() }

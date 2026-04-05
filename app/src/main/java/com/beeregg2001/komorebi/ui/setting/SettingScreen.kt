@@ -112,7 +112,13 @@ fun SettingsScreen(
                 FocusRequester(),
                 FocusRequester()
             ), // 4: Home
-            listOf(FocusRequester(), FocusRequester(), FocusRequester()), // 5: Display
+            // ★ 修正: Displayに項目を追加したので、リストの要素数を3から4に増やす
+            listOf(
+                FocusRequester(),
+                FocusRequester(),
+                FocusRequester(),
+                FocusRequester()
+            ), // 5: Display
             listOf(
                 FocusRequester(),
                 FocusRequester(),
@@ -676,6 +682,18 @@ fun SettingsScreen(
                                     }
                                 }
                             },
+                            onEditTimeFormat = {
+                                uiState.activeDialog = SettingDialogState.Selection(
+                                    "時刻の表示形式",
+                                    listOf(
+                                        "24時間表記" to "24H",
+                                        "12時間表記 (AM/PM)" to "12H"
+                                    ),
+                                    prefs.timeFormat
+                                ) {
+                                    viewModel.updateTimeFormat(it)
+                                }
+                            },
                             itemRs = itemFocusRequesters[5],
                             onClick = {
                                 uiState.restoreFocusRequester = it; uiState.restoreCategoryIndex = 5
@@ -817,9 +835,6 @@ fun SettingsScreen(
 
         is SettingDialogState.Licenses -> OpenSourceLicensesScreen(onBack = { closeDialog() })
 
-        // =========================================================================
-        // ★修正: 連携解除の処理 (onDeleteKey) を追加
-        // =========================================================================
         is SettingDialogState.GeminiSetup -> {
             val localIp by viewModel.localIpAddress.collectAsState()
             GeminiSetupDialog(
@@ -839,7 +854,6 @@ fun SettingsScreen(
                         }
                     }
                 },
-                // ★ 追加: 空文字で上書き保存してキーを削除する
                 onDeleteKey = {
                     viewModel.stopGeminiLocalServer()
                     scope.launch {

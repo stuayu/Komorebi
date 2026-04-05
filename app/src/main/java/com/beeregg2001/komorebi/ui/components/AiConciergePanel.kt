@@ -64,22 +64,21 @@ fun AiConciergePanel(
     var isScrollAreaFocused by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
-    // ★ 挨拶のタイピング中かどうかを判定するフラグ（最初はtrue）
     var isGreetingTyping by remember(isOpen) { mutableStateOf(isOpen && chatHistory.isEmpty()) }
 
     val defaultRequester = if (isSpeechSupported) micFocusRequester else keyboardFocusRequester
 
-    // ★ 修正: タイピング中はフォーカスを要求せず、Fire OSの勝手なキーボード展開を防止
     LaunchedEffect(isOpen) {
         if (isOpen && chatHistory.isNotEmpty()) {
             delay(300); runCatching { defaultRequester.requestFocus() }
         }
     }
 
+    // ★ 修正: chatHistory.isNotEmpty() の条件を削除し、履歴が空でも絶対にフォーカスを戻す！
     LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime, isOpen) {
         if (isOpen && ticketManager.currentTicket == AiFocusTicket.PANEL_DEFAULT) {
             delay(150)
-            if (!isGreetingTyping && chatHistory.isNotEmpty()) {
+            if (!isGreetingTyping) {
                 defaultRequester.safeRequestFocusWithRetry("AiPanelDefault")
             }
             ticketManager.consume(AiFocusTicket.PANEL_DEFAULT)
@@ -210,18 +209,19 @@ fun AiConciergePanel(
                                     "こんにちは！何かお手伝いできることはありますか？\n\n文字入力ボタンからキーボードを開いて、質問や指示を入力してください！"
                                 }
 
-                                // ★ 修正: onTypingFinished で遅延させてから自動でキーボードを開く！
                                 TypingText(
                                     text = greetingText,
                                     scrollState = scrollState,
                                     onTypingFinished = {
                                         coroutineScope.launch {
-                                            delay(800) // 文字起こし完了後、0.8秒の間を置く
+                                            delay(800)
                                             isGreetingTyping = false
+
+                                            // ★ 修正: キーボードを開く直前に、確実にボタンにフォーカスを当てておく
+                                            runCatching { defaultRequester.requestFocus() }
+
                                             if (!isSpeechSupported) {
-                                                onKeyboardClick() // FireOSなら自動でキーボードダイアログを展開！
-                                            } else {
-                                                runCatching { defaultRequester.requestFocus() }
+                                                onKeyboardClick()
                                             }
                                         }
                                     }
@@ -314,7 +314,7 @@ fun AiConciergePanel(
                     ) {
                         Surface(
                             onClick = { /* クリック時は何もしない */ },
-                            enabled = isSpeechSupported && !isGreetingTyping, // タイピング中は無効化
+                            enabled = isSpeechSupported && !isGreetingTyping,
                             modifier = Modifier
                                 .size(56.dp)
                                 .focusRequester(micFocusRequester)
@@ -392,7 +392,7 @@ fun AiConciergePanel(
                     ) {
                         Surface(
                             onClick = { if (!isGreetingTyping) onKeyboardClick() },
-                            enabled = !isGreetingTyping, // タイピング中は無効化してFireOSの暴走を防ぐ
+                            enabled = !isGreetingTyping,
                             modifier = Modifier
                                 .size(56.dp)
                                 .focusRequester(keyboardFocusRequester)
@@ -447,7 +447,6 @@ fun AiConciergePanel(
     }
 }
 
-// ★ 修正: タイピング完了を検知するためのコールバックを追加
 @Composable
 fun TypingText(text: String, scrollState: ScrollState, onTypingFinished: () -> Unit = {}) {
     var displayedText by remember { mutableStateOf("") }
@@ -458,7 +457,7 @@ fun TypingText(text: String, scrollState: ScrollState, onTypingFinished: () -> U
             delay(15)
             scrollState.scrollTo(scrollState.maxValue)
         }
-        onTypingFinished() // タイピングがすべて終わったら発火！
+        onTypingFinished()
     }
     Text(
         text = displayedText,

@@ -18,9 +18,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// =========================================================================
-// ★追加: Ktor ローカルサーバー用のインポート群 (Step 3)
-// =========================================================================
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.cio.CIO
@@ -33,8 +30,6 @@ import io.ktor.http.ContentType
 import io.ktor.server.application.call
 import kotlinx.coroutines.Dispatchers
 
-// ★最適化(R8対策): このデータクラスは proguard-rules.pro の対象外パッケージ(viewmodel)にあるため、
-// リリースビルド時にGsonのパースエラーでクラッシュするのを防ぐために @Keep を追加します。
 @Keep
 data class PostRecordingBatch(
     val name: String,
@@ -101,20 +96,25 @@ class SettingsViewModel @Inject constructor(
     val labShobocalIntegration: StateFlow<String> = settingsRepository.labShobocalIntegration
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
 
-    // ★追加: 隠しスイッチの公開
     val labAllowMirakurunDual: StateFlow<String> = settingsRepository.labAllowMirakurunDual
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
     val defaultPostCommand: StateFlow<String> = settingsRepository.defaultPostCommand
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-    // ★追加: 起動時チャンネルのStateFlow
     val startupChannel: StateFlow<String> = settingsRepository.startupChannel
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
 
-    // [解説: 設定の保存関数]
-    // UI(SettingScreen)から選択されたチャンネル情報(IDやOFFなど)をデータストアに書き込みます。
+    // ★ 追加: 時間表記フォーマットのStateFlow
+    val timeFormat: StateFlow<String> = settingsRepository.timeFormat
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "24H")
+
     fun updateStartupChannel(value: String) = viewModelScope.launch {
         settingsRepository.saveString(SettingsRepository.STARTUP_CHANNEL, value)
+    }
+
+    // ★ 追加: 時間フォーマットの保存
+    fun updateTimeFormat(value: String) = viewModelScope.launch {
+        settingsRepository.saveString(SettingsRepository.TIME_FORMAT, value)
     }
 
     val postRecordingBatchList: StateFlow<List<PostRecordingBatch>> =
@@ -129,7 +129,6 @@ class SettingsViewModel @Inject constructor(
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // ★追加: 贔屓球団のリストを Set<String> として Flow で提供
     val favoriteBaseballTeams: StateFlow<Set<String>> = settingsRepository.favoriteBaseballTeams
         .map { json ->
             try {
@@ -205,7 +204,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // ★追加: 贔屓球団の更新と保存
     fun updateFavoriteBaseballTeams(teams: Set<String>) {
         viewModelScope.launch {
             settingsRepository.saveString(
@@ -237,17 +235,12 @@ class SettingsViewModel @Inject constructor(
         return settingsRepository.getStartupTabOnce()
     }
 
-    // ★追加: 隠しスイッチの更新
     fun updateLabAllowMirakurunDual(value: String) = viewModelScope.launch {
         settingsRepository.saveString(SettingsRepository.LAB_ALLOW_MIRAKURUN_DUAL, value)
     }
 
-    // =========================================================================
-    // ★追加: Gemini API キー設定用 ローカルサーバー機能 (Step 3)
-    // =========================================================================
     private var ktorServer: ApplicationEngine? = null
 
-    // 端末のローカルIPアドレス（スマホにアクセスさせるURL用）
     private val _localIpAddress = MutableStateFlow(getLocalIpAddress())
     val localIpAddress: StateFlow<String> = _localIpAddress
 
@@ -258,11 +251,9 @@ class SettingsViewModel @Inject constructor(
 
         ktorServer = embeddedServer(CIO, port = 8081) {
             routing {
-                // スマホでアクセスしたときに表示される設定画面
                 get("/") {
                     call.respondText(getSetupHtml(), ContentType.Text.Html)
                 }
-                // スマホからAPIキーが送信されたときの受取口
                 post("/submit") {
                     val formParams = call.receiveParameters()
                     val apiKey = formParams["api_key"] ?: ""
@@ -305,7 +296,7 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         } catch (e: Exception) { e.printStackTrace() }
-        return "127.0.0.1" // 取得失敗時のフォールバック
+        return "127.0.0.1"
     }
 
     private fun getSetupHtml(): String {
