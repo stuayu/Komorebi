@@ -91,6 +91,11 @@ class AiConciergeViewModel @Inject constructor(
                 text(
                     "あなたはTVアプリ「Komorebi」の優秀で親しみやすいAIコンシェルジュです。\n" +
                             "ユーザーの意図を汲み取り、アプリの操作が必要な場合のみ【特殊コマンドタグ】を出力します。\n\n" +
+                            "【重要: チャンネル切り替えの推論】\n" +
+                            "「BS11にして」「日テレが見たい」などライブ視聴の要望があった場合、必ずコンテキストの【対応チャンネル一覧】から該当チャンネルを探し、名前の横にある LIVE_ID を使ってタグを出力してください。\n\n" +
+                            "【重要: 番組のおすすめと裏側検索（Deep Dive）】\n" +
+                            "ユーザーから「今やってる面白い映画ある？」「おすすめのアニメは？」など特定のジャンルや番組を尋ねられた場合、コンテキストの「現在放送中の主な番組」の中に該当するものが無ければ、\n" +
+                            "すぐに諦めるのではなく、自ら `[REQ_EPG_SEARCH: | 映画 | | false | ]` のようにジャンルを指定して裏側検索を要求し、結果を待ってから回答してください。\n\n" +
                             "【重要: 回答の簡潔さ】\n" +
                             "録画リストや番組一覧などを聞かれた場合、コンテキストにある全ての番組を回答すると長すぎるため、代表的な3〜5件のみを抜粋して答えてください。\n\n" +
                             "【重要: 一般知識や雑談への対応（愛嬌と万能さ）】\n" +
@@ -100,13 +105,13 @@ class AiConciergeViewModel @Inject constructor(
                             "「録画リストを教えて」「この番組について教えて」といった情報提供や、上記の「一般知識・雑談」など、画面遷移や再生・予約操作が不要な場合は、**例文であっても絶対にタグを出力しないでください**。\n\n" +
                             "【アプリ操作が必要な場合のタグ一覧】\n" +
                             "再生:\n" +
-                            "・[PLAY_LIVE: LIVE_ID]\n" +
+                            "・[PLAY_LIVE: LIVE_ID]  ※必ずLIVE_IDを指定\n" +
                             "・[PLAY_REC: REC_ID]\n\n" +
                             "番組検索・予約 (必ず [タグ名: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名] の形式。不要項目は空白にする):\n" +
                             "1. 検索結果を画面で見たい場合\n" +
                             "   ・[SEARCH_EPG: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名]\n" +
                             "   ※例：「明日の日テレのバラエティ」→ [SEARCH_EPG:  | バラエティ | 2026/04/03 | false | 日テレ]\n" +
-                            "2. 録画予約したい場合 (裏側で検索)\n" +
+                            "2. 録画予約したい場合、またはコンテキストに無いジャンルの現在放送中番組を探したい場合 (裏側で検索)\n" +
                             "   ・[REQ_EPG_SEARCH: キーワード | ジャンル | 日付 | 生中継(true/false) | チャンネル名]\n" +
                             "3. 予約の確定 (REQ_EPG_SEARCHの検索結果を受け取った後)\n" +
                             "   ・[RESERVE_SINGLE: PROGRAM_ID]\n" +
@@ -133,12 +138,11 @@ class AiConciergeViewModel @Inject constructor(
             _internalChatHistory.value = _internalChatHistory.value + userMsg + aiThinkingMsg
 
             try {
-                // ★ 修正: trim() を使って見えない空白や改行を削除し、ログに出力
                 val rawApiKey = settingsRepository.geminiApiKey.first()
                 val currentApiKey = rawApiKey.trim()
                 Log.i(
                     "AI_Concierge",
-                    "🔑 使用APIキー: [${currentApiKey}] (長さ: ${currentApiKey.length}) ※生データ長: ${rawApiKey.length}"
+                    "🔑 使用APIキー: [${currentApiKey}] (長さ: ${currentApiKey.length})"
                 )
 
                 if (currentApiKey.isBlank()) throw IllegalStateException("APIキーが設定されていません")
@@ -179,12 +183,11 @@ class AiConciergeViewModel @Inject constructor(
             _internalChatHistory.value = _internalChatHistory.value + userMsg + aiThinkingMsg
 
             try {
-                // ★ 修正: trim() を使って見えない空白や改行を削除し、ログに出力
                 val rawApiKey = settingsRepository.geminiApiKey.first()
                 val currentApiKey = rawApiKey.trim()
                 Log.i(
                     "AI_Concierge",
-                    "🔑 使用APIキー: [${currentApiKey}] (長さ: ${currentApiKey.length}) ※生データ長: ${rawApiKey.length}"
+                    "🔑 使用APIキー: [${currentApiKey}] (長さ: ${currentApiKey.length})"
                 )
 
                 if (currentApiKey.isBlank()) throw IllegalStateException("APIキーが設定されていません")
@@ -218,9 +221,9 @@ class AiConciergeViewModel @Inject constructor(
                 val sb = java.lang.StringBuilder("システム: 検索結果は以下の通りです。\n")
                 results.take(5).forEach { res ->
                     val p = res.program
-                    sb.append("- ${p.title} (${p.start_time}) [PROGRAM_ID: ${p.id}]\n")
+                    sb.append("- ${p.title} (${p.start_time}) [PROGRAM_ID: ${p.id}] [LIVE_ID: ${res.channel.id}]\n")
                 }
-                sb.append("\nユーザーの意図に合うものがあれば [RESERVE_SINGLE: PROGRAM_ID] を出力し、毎週録画などの指定があれば [RESERVE_AUTO: キーワード] を出力して報告してください。")
+                sb.append("\nユーザーの意図に合うものがあれば [PLAY_LIVE: LIVE_ID] で再生、または [RESERVE_SINGLE: PROGRAM_ID] を出力し、毎週録画などの指定があれば [RESERVE_AUTO: キーワード] を出力して報告してください。")
                 sb.toString()
             }
 
@@ -233,13 +236,8 @@ class AiConciergeViewModel @Inject constructor(
             _internalChatHistory.value = _internalChatHistory.value + aiThinkingMsg
 
             try {
-                // ★ 修正: trim() を使って見えない空白や改行を削除し、ログに出力
                 val rawApiKey = settingsRepository.geminiApiKey.first()
                 val currentApiKey = rawApiKey.trim()
-                Log.i(
-                    "AI_Concierge",
-                    "🔑 使用APIキー: [${currentApiKey}] (長さ: ${currentApiKey.length}) ※生データ長: ${rawApiKey.length}"
-                )
 
                 if (currentApiKey.isBlank()) throw IllegalStateException("APIキーが設定されていません")
 
@@ -258,7 +256,7 @@ class AiConciergeViewModel @Inject constructor(
                 } else ""
 
                 val response = generativeModel.generateContent(content {
-                    text("$contextPrompt\n$historyText\n\nシステムからの検索結果を元に、ユーザーへ回答と最終的な予約タグを出力してください。")
+                    text("$contextPrompt\n$historyText\n\nシステムからの検索結果を元に、ユーザーへ回答と最終的な操作タグを出力してください。")
                 })
                 handleAiResponse(response.text, aiThinkingMsg.id, null)
             } catch (e: Exception) {
@@ -304,9 +302,9 @@ class AiConciergeViewModel @Inject constructor(
 
         Log.i(
             "AI_Concierge", "🧩 Parsed Tags -> " +
-                "Live:${liveMatch?.groupValues}, Rec:${recMatch?.groupValues}, " +
-                "Search:${searchMatch?.groupValues}, ReqSearch:${reqSearchMatch?.groupValues}, " +
-                "ResSingle:${resSingleMatches.map { it.groupValues[1] }}, ResAuto:${resAutoMatch?.groupValues}"
+                    "Live:${liveMatch?.groupValues}, Rec:${recMatch?.groupValues}, " +
+                    "Search:${searchMatch?.groupValues}, ReqSearch:${reqSearchMatch?.groupValues}, " +
+                    "ResSingle:${resSingleMatches.map { it.groupValues[1] }}, ResAuto:${resAutoMatch?.groupValues}"
         )
 
         listOf(
@@ -436,11 +434,29 @@ class AiConciergeViewModel @Inject constructor(
         val sb = StringBuilder(2000)
         val formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm")
         sb.append("【現在の情報】\n時刻: ${LocalDateTime.now().format(formatter)}\n\n")
-        sb.append("【現在放送中の番組（抜粋）】\n")
-        liveChannels.values.flatten().filter { it.programPresent != null }.take(15)
-            .forEach { ch -> sb.append("- ${ch.name}: ${ch.programPresent?.title} [LIVE_ID: ${ch.id}]\n") }
-        sb.append("\n【録画済み番組（最新30件）】\n")
-        recentRecordings.take(30).forEach { sb.append("- ${it.title} [REC_ID: ${it.id}]\n") }
+
+        // 全チャンネルの「名前:LIVE_ID」の辞書を生成（トークンを超節約）
+        sb.append("【対応チャンネル一覧 (名前:LIVE_ID)】\n")
+        liveChannels.forEach { (network, channels) ->
+            val compressedCh = channels.joinToString(", ") { "${it.name}:${it.id}" }
+            sb.append("- [$network] $compressedCh\n")
+        }
+
+        // ★ 修正: 放送波ごとに番組を「均等に」ピックアップして多様性を出す作戦
+        sb.append("\n【現在放送中の主な番組（放送波ごとに抜粋）】\n")
+        liveChannels.forEach { (network, channels) ->
+            val activePrograms = channels.filter { it.programPresent != null }
+            if (activePrograms.isNotEmpty()) {
+                sb.append("[$network]\n")
+                // 各放送波から最大4件ずつピックアップ
+                activePrograms.take(4).forEach { ch ->
+                    sb.append("- ${ch.name}: ${ch.programPresent?.title}\n")
+                }
+            }
+        }
+
+        sb.append("\n【録画済み番組（最新20件）】\n")
+        recentRecordings.take(20).forEach { sb.append("- ${it.title} [REC_ID: ${it.id}]\n") }
         return sb.toString()
     }
 
