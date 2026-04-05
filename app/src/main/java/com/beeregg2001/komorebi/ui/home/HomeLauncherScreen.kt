@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.*
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -38,27 +39,36 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private const val TAG = "HomeLauncher"
 
+// ★ 修正: 引数で timeFormat (12H / 24H) を受け取り、表示を切り替える
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
-fun DigitalClock(modifier: Modifier = Modifier) {
+fun DigitalClock(timeFormat: String, modifier: Modifier = Modifier) {
     var currentTime by remember { mutableStateOf(LocalTime.now()) }
     LaunchedEffect(Unit) {
         while (true) {
             currentTime = LocalTime.now()
-            delay(1000)
+            // 1分ごとに更新して再描画コストを削減
+            delay(60000)
         }
     }
+
+    // "12H" の場合は AM/PM 付き（例: 午後 1:23）、"24H" の場合は数字のみ（例: 13:23）
+    val pattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+    val formattedTime = currentTime.format(DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE))
+
     Text(
-        text = currentTime.format(DateTimeFormatter.ofPattern("HH:mm")),
+        text = formattedTime,
         color = KomorebiTheme.colors.textPrimary,
         style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
         modifier = modifier
     )
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun HomeLauncherScreen(
@@ -67,10 +77,11 @@ fun HomeLauncherScreen(
     epgViewModel: EpgViewModel,
     recordViewModel: RecordViewModel,
     reserveViewModel: ReserveViewModel,
+    settingsViewModel: SettingsViewModel, // ★ 追加: SettingsViewModelを受け取る
     groupedChannels: Map<String, List<Channel>>,
     mirakurunIp: String, mirakurunPort: String,
     konomiIp: String, konomiPort: String,
-    onChannelClick: (Channel?) -> Unit,
+    onChannelClick: (Channel?, Boolean) -> Unit,
     selectedChannel: Channel?,
     onTabChange: (Int) -> Unit,
     initialTabIndex: Int = 0,
@@ -117,6 +128,9 @@ fun HomeLauncherScreen(
     val favoriteBaseballGames by homeViewModel.favoriteBaseballGames.collectAsState()
     val baseballDateOffset by homeViewModel.baseballDateOffset.collectAsState()
 
+    // ★ 取得: SettingsViewModelから現在の時間フォーマット(12H/24H)を取得
+    val timeFormat by settingsViewModel.timeFormat.collectAsState()
+
     val baseTabs = listOf("ホーム", "ライブ", "ビデオ", "番組表", "録画予約")
     val tabs = remember(favoriteBaseballTeams) {
         if (favoriteBaseballTeams.isNotEmpty()) baseTabs + "プロ野球" else baseTabs
@@ -152,12 +166,26 @@ fun HomeLauncherScreen(
     }
 
     LaunchedEffect(isReturningFromPlayer) {
+        Log.i(
+            "KomorebiFocus",
+            "[HomeLauncher] isReturningFromPlayer changed: $isReturningFromPlayer, isFullScreenMode: $isFullScreenMode"
+        )
         if (isReturningFromPlayer && !isFullScreenMode) {
             ui.safeHouseRequester.safeRequestFocusWithRetry("SafeHouse_Return")
             delay(150)
 
             if (safeTabIndex != 1 && safeTabIndex != 2) {
-                ticketManager.issue(HomeFocusTicket.TAB_BAR)
+                val section = homeViewModel.lastClickedSection
+                val itemId = homeViewModel.lastClickedItemId
+                if (safeTabIndex == 0 && section != null && itemId != null) {
+                    ticketManager.issueForHomeRestore(section, itemId)
+                } else if (safeTabIndex == 3 || safeTabIndex == 4) {
+                    if (safeTabIndex == 3) {
+                        onReturnFocusConsumed()
+                    }
+                } else {
+                    ticketManager.issue(HomeFocusTicket.TAB_BAR)
+                }
             }
         }
     }
@@ -173,16 +201,19 @@ fun HomeLauncherScreen(
         }
     }
 
-    // 🌟 修正: isFullScreenMode が false (閉じた時) の処理を整理
     LaunchedEffect(isFullScreenMode) {
         if (!isFullScreenMode && !isReturningFromPlayer) {
             delay(300)
             if (safeTabIndex == 4) {
-                Log.i(
-                    "KomorebiFocus",
-                    "[HomeLauncher] 録画予約タブ(Index 4)への復帰なので、フォーカス復元は子画面(ReserveListScreen)のチケットシステムに任せます。"
-                )
-                // ⚠️ ここでの強制的なフォーカス上書き（ui.contentFirstItemRequesters[4].safeRequestFocus）を削除しました！
+                // 録画予約からの復帰はReserveListScreen内部のチケットに任せる
+            } else if (safeTabIndex == 0) {
+                val section = homeViewModel.lastClickedSection
+                val itemId = homeViewModel.lastClickedItemId
+                if (section != null && itemId != null) {
+                    ticketManager.issueForHomeRestore(section, itemId)
+                } else {
+                    ticketManager.issue(HomeFocusTicket.TAB_BAR)
+                }
             } else if (safeTabIndex != 3) {
                 ticketManager.issue(HomeFocusTicket.TAB_BAR)
             }
@@ -230,6 +261,12 @@ fun HomeLauncherScreen(
                 ticketManager.consume(HomeFocusTicket.CONTENT_TOP)
             }
 
+            HomeFocusTicket.HOME_RESTORE -> {
+                if (isReturningFromPlayer) {
+                    onReturnFocusConsumed()
+                }
+            }
+
             else -> {}
         }
     }
@@ -238,7 +275,7 @@ fun HomeLauncherScreen(
         Box(
             modifier = Modifier
                 .size(1.dp)
-                .alpha(0f)
+                .graphicsLayer { alpha = 0f }
                 .focusRequester(ui.safeHouseRequester)
                 .focusable()
         )
@@ -276,7 +313,8 @@ fun HomeLauncherScreen(
                         },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    DigitalClock()
+                    // ★ 修正: timeFormat を渡して描画を切り替える
+                    DigitalClock(timeFormat = timeFormat)
                     Spacer(modifier = Modifier.width(32.dp))
                     TabRow(
                         selectedTabIndex = safeTabIndex,
@@ -317,6 +355,11 @@ fun HomeLauncherScreen(
                                         down =
                                             if (safeTabIndex == index && ui.isCurrentTabContentReady) ui.contentFirstItemRequesters[index] else FocusRequester.Default
                                         canFocus = !(safeTabIndex == 3 && ui.isEpgJumping)
+
+                                        up = FocusRequester.Cancel
+                                        if (index == 0) {
+                                            left = FocusRequester.Cancel
+                                        }
                                     }) {
                                 Text(
                                     text = title,
@@ -335,8 +378,11 @@ fun HomeLauncherScreen(
                         modifier = Modifier
                             .focusRequester(ui.settingsFocusRequester)
                             .focusProperties {
-                                left = ui.tabFocusRequesters.last(); canFocus =
-                                !(safeTabIndex == 3 && ui.isEpgJumping)
+                                left = ui.tabFocusRequesters[tabs.lastIndex]
+                                canFocus = !(safeTabIndex == 3 && ui.isEpgJumping)
+
+                                up = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
                             },
                         colors = IconButtonDefaults.colors(
                             focusedContainerColor = colors.textPrimary,
@@ -365,7 +411,9 @@ fun HomeLauncherScreen(
                             pickupGenreName = ui.pickupGenreLabel,
                             pickupTimeSlot = ui.genrePickupTimeSlot,
                             groupedChannels = groupedChannels,
-                            onChannelClick = onChannelClick,
+                            onChannelClick = {
+                                if (it != null) onChannelClick(it, false)
+                            },
                             onHistoryClick = { historyItem ->
                                 val programId = historyItem.program.id.toIntOrNull()
                                 val betterProgram = ui.recentRecordings.find { it.id == programId }
@@ -397,7 +445,9 @@ fun HomeLauncherScreen(
                                 ?: lastPlayerChannelId,
                             lastFocusedProgramId = lastPlayerProgramId,
                             isTopNavFocused = ui.topNavHasFocus,
-                            onUiReady = { onUiReady(); ui.isCurrentTabContentReady = true }
+                            onUiReady = { onUiReady(); ui.isCurrentTabContentReady = true },
+                            ticketManager = ticketManager,
+                            homeViewModel = homeViewModel
                         )
 
                         "ライブ" -> {
@@ -406,7 +456,7 @@ fun HomeLauncherScreen(
                                 epgViewModel = epgViewModel,
                                 groupedChannels = groupedChannels,
                                 selectedChannel = selectedChannel,
-                                onChannelClick = onChannelClick,
+                                onChannelClick = { onChannelClick(it, false) },
                                 onFocusChannelChange = { ui.internalLastPlayerChannelId = it },
                                 mirakurunIp = mirakurunIp,
                                 mirakurunPort = mirakurunPort,
@@ -457,6 +507,9 @@ fun HomeLauncherScreen(
                         }
 
                         "番組表" -> {
+                            // ★ 修正: EpgNavigationContainer にも timeFormat を渡せるようにする場合は適宜追加します
+                            // (今回の ModernEpgCanvasEngine の修正で、すでに内部でSettingsViewModelを参照する仕組みなら不要ですが、
+                            // もし必要であれば追加してください。現状は EpgDrawer への渡し込みで解決しています)
                             EpgNavigationContainer(
                                 uiState = ui.epgUiState,
                                 logoUrls = ui.logoUrls,
@@ -498,8 +551,9 @@ fun HomeLauncherScreen(
                                 contentFirstItemRequester = ui.contentFirstItemRequesters[4],
                                 topNavFocusRequester = ui.tabFocusRequesters[4],
                                 groupedChannels = groupedChannels,
-                                // 🌟 追加: ダイアログの開閉状態を子画面に伝達し、復帰トリガーにする
-                                isReserveOverlayOpen = isReserveOverlayOpen
+                                isReserveOverlayOpen = isReserveOverlayOpen,
+                                isReturningFromPlayer = isReturningFromPlayer && safeTabIndex == 4,
+                                onReturnFocusConsumed = onReturnFocusConsumed
                             )
                             LaunchedEffect(Unit) {
                                 delay(500); onUiReady(); ui.isCurrentTabContentReady = true
@@ -514,9 +568,8 @@ fun HomeLauncherScreen(
                                 onDateOffsetChange = { homeViewModel.updateBaseballDateOffset(it) },
                                 onChannelClick = { channel ->
                                     val matchedChannel = groupedChannels.values.flatten()
-                                        .find { it.id == channel.id }; if (matchedChannel != null) onChannelClick(
-                                    matchedChannel
-                                )
+                                        .find { it.id == channel.id }
+                                    if (matchedChannel != null) onChannelClick(matchedChannel, true)
                                 },
                                 onProgramClick = { onEpgProgramSelected(it) },
                                 topNavFocusRequester = ui.tabFocusRequesters[5],

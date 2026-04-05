@@ -1,6 +1,7 @@
 package com.beeregg2001.komorebi.ui.home
 
 import android.os.Build
+import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
@@ -10,8 +11,8 @@ import com.beeregg2001.komorebi.data.mapper.KonomiDataMapper
 import com.beeregg2001.komorebi.data.model.*
 import com.beeregg2001.komorebi.viewmodel.*
 
-// ホーム画面専用のチケットマネージャー
-enum class HomeFocusTicket { NONE, TAB_BAR, CONTENT_TOP }
+// 🌟 修正: HOME_RESTORE チケットを追加（ホーム画面の2次元復帰用）
+enum class HomeFocusTicket { NONE, TAB_BAR, CONTENT_TOP, HOME_RESTORE }
 
 @Stable
 class HomeFocusTicketManager {
@@ -20,14 +21,36 @@ class HomeFocusTicketManager {
     var issueTime by mutableLongStateOf(0L)
         private set
 
+    // 🌟 追加: ホーム画面復帰用のターゲット指定
+    var targetSection by mutableStateOf<String?>(null)
+        private set
+    var targetItemId by mutableStateOf<String?>(null)
+        private set
+
     fun issue(ticket: HomeFocusTicket) {
         currentTicket = ticket
         issueTime = System.currentTimeMillis()
+        Log.i("KomorebiFocus", "🎟️ HomeTicket ISSUED: $ticket")
+    }
+
+    // 🌟 追加: 2段階追尾用のチケット発行メソッド
+    fun issueForHomeRestore(section: String, itemId: String) {
+        targetSection = section
+        targetItemId = itemId
+        currentTicket = HomeFocusTicket.HOME_RESTORE
+        issueTime = System.currentTimeMillis()
+        Log.i(
+            "KomorebiFocus",
+            "🎟️ HomeTicket ISSUED: HOME_RESTORE (Section: $section, ItemID: $itemId)"
+        )
     }
 
     fun consume(ticket: HomeFocusTicket) {
         if (currentTicket == ticket) {
+            Log.i("KomorebiFocus", "🗑️ HomeTicket CONSUMED: $ticket")
             currentTicket = HomeFocusTicket.NONE
+            targetSection = null
+            targetItemId = null
         }
     }
 }
@@ -78,7 +101,6 @@ class HomeLauncherState(
     val contentFirstItemRequesters = List(10) { FocusRequester() }
     val settingsFocusRequester = FocusRequester()
 
-    // 🌟 フォーカスが迷子になった時の避難所
     val safeHouseRequester = FocusRequester()
 
     val watchHistoryPrograms: List<RecordedProgram>
@@ -86,6 +108,7 @@ class HomeLauncherState(
             KonomiDataMapper.toDomainModel(it)
         }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     fun onTabSelected(
         index: Int,
         onTabChange: (Int) -> Unit,
@@ -96,6 +119,9 @@ class HomeLauncherState(
     ) {
         onTabChange(index)
         isCurrentTabContentReady = false
+        // 🌟 追加: タブを切り替えたら、復帰用の記憶をリセットする
+        homeViewModel.clearFocusMemory()
+
         when (index) {
             0 -> {
                 homeViewModel.refreshHomeData()
@@ -140,28 +166,24 @@ class HomeLauncherState(
                 isSettingsOpen || isRecordListOpen || isReserveOverlayOpen || isSeriesListOpen
     }
 
-    // 🌟 修正: タブ切り替え時のフォーカス消失（迷子）を防ぐための SafeHouse 退避を追加
     fun handleBackNavigation(
         onTabChange: (Int) -> Unit,
         onFinalBack: () -> Unit,
         onBackTriggered: () -> Unit,
         requestTopNavFocus: () -> Unit,
-        escapeToSafeHouse: () -> Unit // ★新規追加: 安全地帯への退避
+        escapeToSafeHouse: () -> Unit
     ) {
         if (!topNavHasFocus) {
-            // 1. コンテンツにいる場合：まずは安全地帯に逃がしてからトップナビに戻す
             escapeToSafeHouse()
             requestTopNavFocus()
             onBackTriggered()
         } else if (selectedTabIndex != 0) {
-            // 2. トップナビにいてホーム以外の場合：UIが消滅する前に安全地帯に逃がす
             escapeToSafeHouse()
             selectedTabIndex = 0
             onTabChange(0)
-            requestTopNavFocus() // 確実にホームのタブにフォーカスを当て直す
+            requestTopNavFocus()
             onBackTriggered()
         } else {
-            // 3. ホームタブのトップナビにいる場合：アプリ終了
             onFinalBack()
         }
     }

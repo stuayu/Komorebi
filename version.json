@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "0.9.0-beta2",
-  "releaseNotes": "・ライブ視聴再生時に音声のみ再生され、映像が再生されないバグに暫定対応\n・その他細かいバグを修正\n",
-  "apkUrl": "https://github.com/BeerEgg2001/Komorebi/releases/download/0.9.0-beta2/Komorebi-0.9.0-beta2.apk"
+  "versionCode": 8,
+  "versionName": "1.0.0-beta",
+  "releaseNotes": "・AIコンシェルジュ機能の追加\n・録画リストDBの負荷軽減\n・フォーカス迷子になる問題に対応\n・その他細かいバグを修正\n",
+  "apkUrl": "https://github.com/BeerEgg2001/Komorebi/releases/download/1.0.0-beta/Komorebi-1.0.0-beta.apk"
 }

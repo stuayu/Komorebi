@@ -55,12 +55,12 @@ class SettingsRepository @Inject constructor(
         val HOME_PICKUP_TIME = stringPreferencesKey("home_pickup_time")
 
         val STARTUP_TAB = stringPreferencesKey("startup_tab")
-
-        // [解説: データストアのキー]
-        // 起動時に再生するチャンネル（OFF, LAST_WATCHED, チャンネルID）を保存するためのキーを追加します。
         val STARTUP_CHANNEL = stringPreferencesKey("startup_channel")
         val APP_THEME = stringPreferencesKey("app_theme")
         val DEFAULT_RECORD_LIST_VIEW = stringPreferencesKey("default_record_list_view")
+
+        // ★ 追加: 時間表記フォーマット (12H or 24H)
+        val TIME_FORMAT = stringPreferencesKey("time_format")
     }
 
     val konomiIp: Flow<String> = context.dataStore.data.map { it[KONOMI_IP] ?: "" }
@@ -115,14 +115,13 @@ class SettingsRepository @Inject constructor(
     val homePickupTime: Flow<String> = context.dataStore.data.map { it[HOME_PICKUP_TIME] ?: "自動" }
 
     val startupTab: Flow<String> = context.dataStore.data.map { it[STARTUP_TAB] ?: "ホーム" }
-
-    // [解説: データ読み取りフロー]
-    // デフォルト値は "OFF"（設定しない）としてフローを提供します。
     val startupChannel: Flow<String> = context.dataStore.data.map { it[STARTUP_CHANNEL] ?: "OFF" }
-
     val appTheme: Flow<String> = context.dataStore.data.map { it[APP_THEME] ?: "MONOTONE" }
     val defaultRecordListView: Flow<String> =
         context.dataStore.data.map { it[DEFAULT_RECORD_LIST_VIEW] ?: "LIST" }
+
+    // ★ 追加: デフォルトは24時間表記(24H)
+    val timeFormat: Flow<String> = context.dataStore.data.map { it[TIME_FORMAT] ?: "24H" }
 
     val isInitialized: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs.contains(KONOMI_IP) || prefs.contains(MIRAKURUN_IP)

@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalTvMaterial3Api::class)
+@file:OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class)
 
 package com.beeregg2001.komorebi.ui.home
 
@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -40,8 +41,8 @@ import java.util.Locale
 fun BaseballDashboardScreen(
     groupedGames: List<Pair<String, List<BaseballGameInfo>>>,
     groupedChannels: Map<String, List<Channel>>,
-    dateOffset: Int, // ★追加: 日付オフセット（0, 1, 2）
-    onDateOffsetChange: (Int) -> Unit, // ★追加: 日付変更コールバック
+    dateOffset: Int,
+    onDateOffsetChange: (Int) -> Unit,
     onChannelClick: (Channel) -> Unit,
     onProgramClick: (EpgProgram) -> Unit,
     topNavFocusRequester: FocusRequester,
@@ -54,14 +55,12 @@ fun BaseballDashboardScreen(
         onUiReady()
     }
 
-    // ★追加: 現在選択されている日付（オフセットから算出）
     val targetDate = remember(dateOffset) {
         val now = OffsetDateTime.now()
         val base = if (now.hour < 4) now.minusDays(1) else now
         base.plusDays(dateOffset.toLong())
     }
 
-    // ★追加: 日付の表示用フォーマット（例: "3月18日(水)"）
     val dateStr = remember(targetDate) {
         val formatter = DateTimeFormatter.ofPattern("M月d日 (E)", Locale.JAPANESE)
         targetDate.format(formatter)
@@ -72,9 +71,6 @@ fun BaseballDashboardScreen(
             .fillMaxSize()
             .padding(horizontal = 48.dp)
     ) {
-        // ==========================================
-        // ★追加: 日付ナビゲーションヘッダー
-        // ==========================================
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -82,9 +78,7 @@ fun BaseballDashboardScreen(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 前日ボタン (offset > 0 のみ有効)
             val prevBtnModifier = if (groupedGames.isEmpty() && dateOffset == 2) {
-                // 試合がない日かつ、明後日から明日に戻った直後なら、このボタンに初期フォーカスを当てる
                 Modifier.focusRequester(contentFirstItemRequester)
             } else Modifier
 
@@ -97,7 +91,11 @@ fun BaseballDashboardScreen(
                     contentColor = colors.textPrimary,
                     focusedContentColor = if (colors.isDark) Color.Black else Color.White
                 ),
-                modifier = prevBtnModifier.focusProperties { up = topNavFocusRequester }
+                // 🌟 追加: ボタンの左抜けブロック
+                modifier = prevBtnModifier.focusProperties {
+                    up = topNavFocusRequester
+                    left = FocusRequester.Cancel
+                }
             ) {
                 Icon(Icons.Default.ChevronLeft, contentDescription = "前日")
                 Spacer(Modifier.width(8.dp))
@@ -115,9 +113,7 @@ fun BaseballDashboardScreen(
 
             Spacer(Modifier.width(32.dp))
 
-            // 翌日ボタン (offset < 2 のみ有効)
             val nextBtnModifier = if (groupedGames.isEmpty() && dateOffset < 2) {
-                // 試合がない日で、明日以降に進める状態ならこのボタンに初期フォーカスを当てる
                 Modifier.focusRequester(contentFirstItemRequester)
             } else Modifier
 
@@ -130,7 +126,11 @@ fun BaseballDashboardScreen(
                     contentColor = colors.textPrimary,
                     focusedContentColor = if (colors.isDark) Color.Black else Color.White
                 ),
-                modifier = nextBtnModifier.focusProperties { up = topNavFocusRequester }
+                // 🌟 追加: ボタンの右抜けブロック
+                modifier = nextBtnModifier.focusProperties {
+                    up = topNavFocusRequester
+                    right = FocusRequester.Cancel
+                }
             ) {
                 Text("翌日", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
@@ -138,9 +138,6 @@ fun BaseballDashboardScreen(
             }
         }
 
-        // ==========================================
-        // リストコンテンツ
-        // ==========================================
         if (groupedGames.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -173,7 +170,6 @@ fun BaseballDashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(24.dp)
                         ) {
                             itemsIndexed(teamGames) { gameIndex, game ->
-                                // 試合がある場合は、一番最初のカードに初期フォーカスを当てる
                                 val modifier = if (teamIndex == 0 && gameIndex == 0) {
                                     Modifier.focusRequester(contentFirstItemRequester)
                                 } else Modifier
@@ -209,7 +205,14 @@ fun BaseballDashboardScreen(
                                             onProgramClick(game.program)
                                         }
                                     },
-                                    modifier = modifier.width(380.dp)
+                                    // 🌟 追加: 横方向の端ガード
+                                    modifier = modifier
+                                        .width(380.dp)
+                                        .focusProperties {
+                                            if (gameIndex == 0) left = FocusRequester.Cancel
+                                            if (gameIndex == teamGames.lastIndex) right =
+                                                FocusRequester.Cancel
+                                        }
                                 )
                             }
                         }

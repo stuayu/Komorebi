@@ -78,7 +78,6 @@ fun LiveContent(
     val liveRows by channelViewModel.liveRows.collectAsState()
     val listState = rememberLazyListState()
 
-    // 各ジャンル行の横スクロール状態を個別に記憶する Map
     val rowStates = remember { mutableStateMapOf<String, LazyListState>() }
 
     val targetChannelFocusRequester = remember { FocusRequester() }
@@ -112,7 +111,6 @@ fun LiveContent(
 
     LaunchedEffect(isPlayerActive) { onPlayerStateChanged(isPlayerActive) }
 
-    // 🌟 修正: 復帰処理にログを追加
     LaunchedEffect(isReturningFromPlayer, liveRows.isNotEmpty()) {
         Log.i(
             "KomorebiFocus",
@@ -127,7 +125,6 @@ fun LiveContent(
                 var colIndex = -1
                 var genreId = ""
 
-                // 対象のチャンネルが「何行目の何列目」にあるかを検索
                 for (i in liveRows.indices) {
                     val idx = liveRows[i].channels.indexOfFirst { it.channel.id == targetId }
                     if (idx != -1) {
@@ -138,40 +135,20 @@ fun LiveContent(
                     }
                 }
 
-                Log.i(
-                    "KomorebiFocus",
-                    "[LiveContent] 検索結果 -> Row: $rowIndex, Col: $colIndex, Genre: $genreId"
-                )
-
                 if (rowIndex != -1 && colIndex != -1) {
-                    // ① 縦方向にジャンルの行までスクロール
                     listState.scrollToItem(maxOf(0, rowIndex))
-                    // ② 横方向に該当のチャンネルまでスクロール
                     val rState = rowStates.getOrPut(genreId) { LazyListState() }
                     rState.scrollToItem(maxOf(0, colIndex - 1))
 
-                    Log.i(
-                        "KomorebiFocus",
-                        "[LiveContent] スクロール完了。200ms後にフォーカスを要求します..."
-                    )
                     delay(200)
                     targetChannelFocusRequester.safeRequestFocusWithRetry("LiveChannelTarget")
-                    Log.i("KomorebiFocus", "[LiveContent] フォーカス要求完了。フラグを下ろします。")
                     onReturnFocusConsumed()
                 } else {
-                    Log.w(
-                        "KomorebiFocus",
-                        "[LiveContent] 対象チャンネルが見つかりません。トップナビにフォールバックします。"
-                    )
                     delay(200)
                     topNavFocusRequester.safeRequestFocusWithRetry("LiveNavFallback")
                     onReturnFocusConsumed()
                 }
             } else {
-                Log.w(
-                    "KomorebiFocus",
-                    "[LiveContent] targetId が null です。トップナビにフォールバックします。"
-                )
                 delay(200)
                 topNavFocusRequester.safeRequestFocusWithRetry("LiveNavFallback")
                 onReturnFocusConsumed()
@@ -195,7 +172,6 @@ fun LiveContent(
                         right = FocusRequester.Cancel
                     } else Modifier)
             ) {
-                // 上部 55%: Hero Info エリア
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -211,7 +187,6 @@ fun LiveContent(
                     }
                 }
 
-                // 下部 45%: Bottom Carousel (コンパクトなチャンネルリスト)
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -263,9 +238,9 @@ fun LiveContent(
                                                 if (row.genreId == liveRows.firstOrNull()?.genreId) {
                                                     up = topNavFocusRequester
                                                 }
-                                                if (isLastItem) {
-                                                    right = FocusRequester.Cancel
-                                                }
+                                                // 🌟 追加: 端でのフォーカス抜け落ち（設定ボタン等への誤爆）防止
+                                                if (index == 0) left = FocusRequester.Cancel
+                                                if (isLastItem) right = FocusRequester.Cancel
                                             }
                                             .onFocusChanged {
                                                 if (it.isFocused) {

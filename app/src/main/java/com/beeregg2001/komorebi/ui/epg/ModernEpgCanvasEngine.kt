@@ -71,7 +71,8 @@ fun ModernEpgCanvasEngine_Smooth(
     onUpdateTargetTime: (OffsetDateTime) -> Unit,
     onRequestJumpToNow: () -> Unit,
     searchButtonFocusRequester: FocusRequester,
-    onSearchClick: () -> Unit
+    onSearchClick: () -> Unit,
+    timeFormat: String // ★ 追加: timeFormat を受け取る
 ) {
     // ==========================================
     // 1. 初期化とリソースの準備
@@ -98,6 +99,49 @@ fun ModernEpgCanvasEngine_Smooth(
     }
     val subTabFocusRequesters =
         remember(visibleTabs.size) { List(visibleTabs.size) { FocusRequester() } }
+
+    // ==========================================
+    // 🌟 追加: EPG座標復元システムのトリガーと記憶ロジック
+    // ==========================================
+    val epgViewModel: com.beeregg2001.komorebi.viewmodel.EpgViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel()
+
+    // 詳細画面から戻った際の復元処理
+    LaunchedEffect(epgViewModel.epgRestoreTrigger) {
+        if (epgViewModel.epgRestoreTrigger > 0L) {
+            val targetCh = epgViewModel.lastFocusedChannelId
+            val targetTime = epgViewModel.lastFocusedTime
+            if (targetCh != null && targetTime != null) {
+                Log.i(
+                    "KomorebiFocus",
+                    "[ModernEpgCanvas] 復元トリガー検知！ $targetCh - $targetTime へジャンプします"
+                )
+                epgState.restoreFocus(targetCh, targetTime)
+                delay(150)
+                gridFocusRequester.requestFocus()
+                epgViewModel.clearEpgFocus()
+            }
+        }
+    }
+
+    // 🌟 追加③: 現在のフォーカス位置を常に記憶する処理（EpgStateの判定結果をそのまま使う）
+    androidx.compose.runtime.LaunchedEffect(
+        epgState.focusedCol,
+        epgState.focusedMin,
+        epgState.currentFocusedProgram
+    ) {
+        val ch = epgState.uiChannels.getOrNull(epgState.focusedCol)
+        val prog = epgState.currentFocusedProgram // State側でマージン込みで正確に計算された番組
+
+        if (ch != null && prog != null && prog.title != "（番組情報なし）") {
+            val time = com.beeregg2001.komorebi.ui.epg.EpgDataConverter.safeParseTime(
+                prog.start_time,
+                epgState.baseTime
+            )
+            epgViewModel.saveEpgFocus(ch.wrapper.channel.id, time)
+        }
+    }
+    // ==========================================
 
     // ==========================================
     // 2. UI状態・フラグの管理
@@ -212,7 +256,6 @@ fun ModernEpgCanvasEngine_Smooth(
                     .weight(1f)
                     .fillMaxWidth()
                     .focusRequester(gridFocusRequester)
-                    // グリッドにフォーカスが当たったら、上部のヘッダーを隠して画面を広く使う
                     .onFocusChanged {
                         isContentFocused = it.isFocused
                         if (it.isFocused) isHeaderVisible = false
@@ -277,7 +320,6 @@ fun ModernEpgCanvasEngine_Smooth(
                                         ).toMinutes().toInt()
                                     } ?: (epgState.focusedMin + 30)
 
-                                    // 現在取得している番組表データの一番下まで到達した場合、翌日のデータをAPIから取得要求する
                                     if (next >= epgState.maxScrollMinutes) {
                                         val currentTarget =
                                             (uiState as? EpgUiState.Success)?.targetTime
@@ -306,7 +348,6 @@ fun ModernEpgCanvasEngine_Smooth(
                                         ).toMinutes().toInt() - 1
                                     } ?: (epgState.focusedMin - 30)
 
-                                    // 取得しているデータの一番上まで到達した場合の処理
                                     if (prev < 0) {
                                         val todayStart =
                                             OffsetDateTime.now().withHour(4).withMinute(0)
@@ -315,14 +356,12 @@ fun ModernEpgCanvasEngine_Smooth(
                                                         1
                                                     ) else it
                                                 }
-                                        // すでに一番最初（当日朝4時）の場合は、上部のヘッダーにフォーカスを逃がす
                                         if (!epgState.baseTime.isBefore(todayStart)) {
                                             isHeaderVisible = true
                                             pendingHeaderFocusIndex =
                                                 visibleTabs.indexOfFirst { it.second == currentType }
                                                     .coerceAtLeast(0)
                                         } else {
-                                            // 前日のデータをAPIから取得要求する
                                             val prevDayEnd = epgState.baseTime.minusHours(1)
                                             if (lastRequestedTargetTime != prevDayEnd) {
                                                 lastRequestedTargetTime = prevDayEnd
@@ -335,8 +374,14 @@ fun ModernEpgCanvasEngine_Smooth(
                                     }
                                 }
 
+                                else -> false
+                            }
+                        }
+                        // ★修正: 決定キーの処理を KeyUp 側に完全分離！
+                        else if (event.type == KeyEventType.KeyUp) {
+                            when (event.key) {
                                 // 決定キー: 選択中の番組詳細画面を開く
-                                Key.DirectionCenter, Key.Enter -> {
+                                Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                                     epgState.currentFocusedProgram?.let {
                                         if (it.title != "（番組情報なし）") onProgramSelected(it)
                                     }; true
@@ -362,7 +407,8 @@ fun ModernEpgCanvasEngine_Smooth(
                                         logoPainters = logoPainters,
                                         isGridFocused = isContentFocused || epgState.hasData,
                                         reserveMap = reserveMap,
-                                        clockPainter = clockPainter
+                                        clockPainter = clockPainter,
+                                        timeFormat = timeFormat
                                     )
                                     hasRenderedFirstFrame = true
                                 }

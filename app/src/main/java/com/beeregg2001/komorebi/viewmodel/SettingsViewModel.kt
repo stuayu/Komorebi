@@ -1,5 +1,7 @@
 package com.beeregg2001.komorebi.viewmodel
 
+import android.util.Log
+import androidx.annotation.Keep
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.beeregg2001.komorebi.data.SettingsRepository
@@ -8,6 +10,7 @@ import com.beeregg2001.komorebi.data.sync.RecordSyncEngine
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -15,7 +18,19 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// バッチ設定用のデータモデル
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.engine.ApplicationEngine
+import io.ktor.server.cio.CIO
+import io.ktor.server.routing.routing
+import io.ktor.server.routing.get
+import io.ktor.server.routing.post
+import io.ktor.server.response.respondText
+import io.ktor.server.request.receiveParameters
+import io.ktor.http.ContentType
+import io.ktor.server.application.call
+import kotlinx.coroutines.Dispatchers
+
+@Keep
 data class PostRecordingBatch(
     val name: String,
     val path: String
@@ -80,21 +95,28 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
     val labShobocalIntegration: StateFlow<String> = settingsRepository.labShobocalIntegration
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
-    // ★追加: 隠しスイッチの公開
+
     val labAllowMirakurunDual: StateFlow<String> = settingsRepository.labAllowMirakurunDual
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
     val defaultPostCommand: StateFlow<String> = settingsRepository.defaultPostCommand
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-    // ★追加: 起動時チャンネルのStateFlow
     val startupChannel: StateFlow<String> = settingsRepository.startupChannel
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
 
-    // [解説: 設定の保存関数]
-    // UI(SettingScreen)から選択されたチャンネル情報(IDやOFFなど)をデータストアに書き込みます。
+    // ★ 追加: 時間表記フォーマットのStateFlow
+    val timeFormat: StateFlow<String> = settingsRepository.timeFormat
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "24H")
+
     fun updateStartupChannel(value: String) = viewModelScope.launch {
         settingsRepository.saveString(SettingsRepository.STARTUP_CHANNEL, value)
     }
+
+    // ★ 追加: 時間フォーマットの保存
+    fun updateTimeFormat(value: String) = viewModelScope.launch {
+        settingsRepository.saveString(SettingsRepository.TIME_FORMAT, value)
+    }
+
     val postRecordingBatchList: StateFlow<List<PostRecordingBatch>> =
         settingsRepository.postRecordingBatchList
             .map { json ->
@@ -107,7 +129,6 @@ class SettingsViewModel @Inject constructor(
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // ★追加: 贔屓球団のリストを Set<String> として Flow で提供
     val favoriteBaseballTeams: StateFlow<Set<String>> = settingsRepository.favoriteBaseballTeams
         .map { json ->
             try {
@@ -183,7 +204,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // ★追加: 贔屓球団の更新と保存
     fun updateFavoriteBaseballTeams(teams: Set<String>) {
         viewModelScope.launch {
             settingsRepository.saveString(
@@ -215,8 +235,105 @@ class SettingsViewModel @Inject constructor(
         return settingsRepository.getStartupTabOnce()
     }
 
-    // ★追加: 隠しスイッチの更新
     fun updateLabAllowMirakurunDual(value: String) = viewModelScope.launch {
         settingsRepository.saveString(SettingsRepository.LAB_ALLOW_MIRAKURUN_DUAL, value)
+    }
+
+    private var ktorServer: ApplicationEngine? = null
+
+    private val _localIpAddress = MutableStateFlow(getLocalIpAddress())
+    val localIpAddress: StateFlow<String> = _localIpAddress
+
+    fun startGeminiLocalServer() {
+        if (ktorServer != null) return
+
+        _localIpAddress.value = getLocalIpAddress()
+
+        ktorServer = embeddedServer(CIO, port = 8081) {
+            routing {
+                get("/") {
+                    call.respondText(getSetupHtml(), ContentType.Text.Html)
+                }
+                post("/submit") {
+                    val formParams = call.receiveParameters()
+                    val apiKey = formParams["api_key"] ?: ""
+
+                    if (apiKey.isNotBlank()) {
+                        viewModelScope.launch {
+                            settingsRepository.saveString(SettingsRepository.GEMINI_API_KEY, apiKey)
+                        }
+                        val successHtml = "<html><body style='font-family:sans-serif; text-align:center; padding:50px; background:#e8f0fe;'>" +
+                                "<h2 style='color:#1a73e8;'>連携が完了しました！🎉</h2>" +
+                                "<p>テレビ画面を確認してください。この画面は閉じて大丈夫です。</p>" +
+                                "</body></html>"
+                        call.respondText(successHtml, ContentType.Text.Html)
+                    } else {
+                        call.respondText("APIキーが空です。戻ってやり直してください。", ContentType.Text.Plain)
+                    }
+                }
+            }
+        }.start(wait = false)
+        Log.i("SettingsViewModel", "Started Local Server on port 8081")
+    }
+
+    fun stopGeminiLocalServer() {
+        viewModelScope.launch(Dispatchers.IO) {
+            ktorServer?.stop(gracePeriodMillis = 500, timeoutMillis = 1000)
+            ktorServer = null
+            Log.i("SettingsViewModel", "Stopped Local Server")
+        }
+    }
+
+    private fun getLocalIpAddress(): String {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            for (intf in interfaces) {
+                val addrs = intf.inetAddresses
+                for (addr in addrs) {
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                        return addr.hostAddress ?: ""
+                    }
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return "127.0.0.1"
+    }
+
+    private fun getSetupHtml(): String {
+        return """
+            <!DOCTYPE html>
+            <html lang="ja">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>AIコンシェルジュ設定</title>
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f0f2f5; color: #333; display: flex; justify-content: center; padding: 20px; }
+                    .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 500px; width: 100%; }
+                    h2 { margin-top: 0; color: #1a73e8; text-align: center; }
+                    .step { background: #e8f0fe; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+                    .btn { display: block; width: 100%; padding: 15px; background: #34a853; color: white; text-align: center; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin-top: 10px; box-sizing: border-box; }
+                    input[type="text"] { width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
+                    button[type="submit"] { width: 100%; padding: 15px; background: #1a73e8; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h2>AIコンシェルジュ連携</h2>
+                    <div class="step">
+                        <p><b>Step 1:</b> 以下のボタンからGoogle AI Studioを開き、APIキー(AIzaSy...)を作成してコピーしてください。</p>
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" class="btn">GoogleからAPIキーを取得</a>
+                    </div>
+                    <div class="step">
+                        <p><b>Step 2:</b> コピーしたAPIキーを下に貼り付けて、送信ボタンを押してください。</p>
+                        <form action="/submit" method="post">
+                            <input type="text" name="api_key" placeholder="AIzaSy..." required>
+                            <button type="submit">テレビに送信する</button>
+                        </form>
+                    </div>
+                </div>
+            </body>
+            </html>
+        """.trimIndent()
     }
 }

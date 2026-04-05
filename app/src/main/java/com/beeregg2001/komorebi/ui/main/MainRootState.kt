@@ -3,6 +3,27 @@ package com.beeregg2001.komorebi.ui.main
 import androidx.compose.runtime.*
 import com.beeregg2001.komorebi.data.model.*
 
+enum class AiFocusTicket { NONE, PANEL_DEFAULT }
+
+@Stable
+class AiFocusTicketManager {
+    var currentTicket by mutableStateOf(AiFocusTicket.NONE)
+        private set
+    var issueTime by mutableLongStateOf(0L)
+        private set
+
+    fun issue(ticket: AiFocusTicket) {
+        currentTicket = ticket
+        issueTime = System.currentTimeMillis()
+    }
+
+    fun consume(ticket: AiFocusTicket) {
+        if (currentTicket == ticket) {
+            currentTicket = AiFocusTicket.NONE
+        }
+    }
+}
+
 /**
  * MainRootScreenのすべてのUI状態(変数)を管理するState Holderクラス
  */
@@ -31,6 +52,11 @@ class MainRootState {
     var isSeriesListOpen by mutableStateOf(false)
     var toastMessage by mutableStateOf<String?>(null)
 
+    // 🌟 AIコンシェルジュ関連のフラグ・マネージャー
+    var isAiConciergeOpen by mutableStateOf(false)
+    var showAiKeyboardInput by mutableStateOf(false)
+    val aiTicketManager = AiFocusTicketManager()
+
     // プレイヤー状態
     var isPlayerMiniListOpen by mutableStateOf(false)
     var playerShowOverlay by mutableStateOf(true)
@@ -46,7 +72,10 @@ class MainRootState {
     var lastSelectedProgramId by mutableStateOf<String?>(null)
     var isReturningFromPlayer by mutableStateOf(false)
 
-    // ★追加: 再生から戻った際にフォーカスすべき録画番組のID
+    // プロ野球特化モードのフラグ
+    var isBaseballMode by mutableStateOf(false)
+
+    // 再生から戻った際にフォーカスすべき録画番組のID
     var lastPlayedRecordingId by mutableStateOf<Int?>(null)
 
     // システム状態
@@ -56,7 +85,7 @@ class MainRootState {
     var showConnectionErrorDialog by mutableStateOf(false)
     var hasAppliedStartupTab by mutableStateOf(false)
 
-    // ★追加: 起動時チャンネルの適用フラグ
+    // 起動時チャンネルの適用フラグ
     var hasAppliedStartupChannel by mutableStateOf(false)
 
     var editingCondition by mutableStateOf<ReservationCondition?>(null)
