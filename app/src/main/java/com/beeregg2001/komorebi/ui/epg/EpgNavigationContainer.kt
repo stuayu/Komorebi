@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.tv.material3.*
 import com.beeregg2001.komorebi.common.safeRequestFocus
 import com.beeregg2001.komorebi.data.model.EpgProgram
@@ -53,6 +54,7 @@ import com.beeregg2001.komorebi.viewmodel.EpgUiState
 import com.beeregg2001.komorebi.viewmodel.UiSearchResultItem
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import com.beeregg2001.komorebi.ui.video.components.RecordSearchHistoryDropdown
+import com.beeregg2001.komorebi.viewmodel.SettingsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
@@ -70,6 +72,7 @@ fun EpgNavigationContainer(
     isJumpMenuOpen: Boolean,
     onJumpMenuStateChanged: (Boolean) -> Unit,
     onNavigateToPlayer: (String, String, String) -> Unit,
+    settingsViewModel: SettingsViewModel = hiltViewModel(), // ★ ViewModelを取得
     currentType: String,
     onTypeChanged: (String) -> Unit,
     restoreChannelId: String?,
@@ -89,6 +92,8 @@ fun EpgNavigationContainer(
     val scope = rememberCoroutineScope()
     val colors = KomorebiTheme.colors
 
+    val timeFormat by settingsViewModel.timeFormat.collectAsState()
+
     var isInternalJumping by remember { mutableStateOf(false) }
 
     val gridFocusRequester = remember { FocusRequester() }
@@ -103,7 +108,8 @@ fun EpgNavigationContainer(
     val historyListFocusRequester = remember { FocusRequester() }
     val historyFirstItemFocusRequester = remember { FocusRequester() }
 
-    val searchResultsFirstItemRequester = remember { FocusRequester() }
+    // ★修正: 変数名をリスト全体を指すように変更
+    val searchResultsListRequester = remember { FocusRequester() }
     val searchResultsBackButtonRequester = remember { FocusRequester() }
 
     val safeHouseRequester = remember { FocusRequester() }
@@ -113,20 +119,35 @@ fun EpgNavigationContainer(
     var isSearchInputFocused by remember { mutableStateOf(false) }
     var isHistoryFocused by remember { mutableStateOf(false) }
 
+    val epgViewModel: com.beeregg2001.komorebi.viewmodel.EpgViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel()
+    var wasProgramDetailOpen by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(
+            false
+        )
+    }
+
+    androidx.compose.runtime.LaunchedEffect(selectedProgram) {
+        if (selectedProgram != null) {
+            wasProgramDetailOpen = true
+        } else if (wasProgramDetailOpen) {
+            wasProgramDetailOpen = false
+            epgViewModel.triggerRestore()
+        }
+    }
     LaunchedEffect(isInternalJumping) { onJumpStateChanged(isInternalJumping) }
 
-    // ★追加: 詳細画面から戻ってきたときのフォーカス復帰（フォーカスロスト＆クラッシュ対策）
     var wasProgramSelected by remember { mutableStateOf(false) }
     LaunchedEffect(selectedProgram) {
         if (selectedProgram != null) {
             wasProgramSelected = true
         } else if (wasProgramSelected) {
-            // selectedProgram が null に戻った ＝ 詳細画面が閉じた！
             wasProgramSelected = false
-            delay(150) // 画面の遷移アニメーションを少し待つ
+            delay(150)
             if (activeSearchQuery.isNotEmpty()) {
                 if (searchResults.isNotEmpty()) {
-                    searchResultsFirstItemRequester.safeRequestFocus("DetailToSearchResult")
+                    // ★修正: リスト全体へフォーカスを要求（focusRestorerが自動で元のアイテムへ導いてくれる）
+                    searchResultsListRequester.safeRequestFocus("DetailToSearchResult")
                 } else {
                     searchResultsBackButtonRequester.safeRequestFocus("DetailToSearchEmpty")
                 }
@@ -176,7 +197,8 @@ fun EpgNavigationContainer(
             } else {
                 delay(150)
                 if (searchResults.isNotEmpty()) {
-                    searchResultsFirstItemRequester.safeRequestFocus("SearchResults_List")
+                    // ★修正: リスト全体へフォーカスを要求
+                    searchResultsListRequester.safeRequestFocus("SearchResults_List")
                 } else {
                     searchResultsBackButtonRequester.safeRequestFocus("SearchResults_Empty")
                 }
@@ -204,9 +226,6 @@ fun EpgNavigationContainer(
                 .focusable()
         )
 
-        // ==========================================
-        // メインコンテンツ切り替え
-        // ==========================================
         Box(modifier = Modifier.fillMaxSize()) {
             if (activeSearchQuery.isEmpty()) {
                 ModernEpgCanvasEngine_Smooth(
@@ -236,7 +255,8 @@ fun EpgNavigationContainer(
                             gridFocusRequester.safeRequestFocus("EpgNav_JumpNow")
                             isInternalJumping = false
                         }
-                    }
+                    },
+                    timeFormat = timeFormat
                 )
             } else {
                 BackHandler(enabled = true) { handleBackFromSearchResults() }
@@ -269,7 +289,7 @@ fun EpgNavigationContainer(
                                 .focusProperties {
                                     up = mainTabFocusRequester
                                     left = FocusRequester.Cancel
-                                    down = searchResultsFirstItemRequester
+                                    down = searchResultsListRequester // ★修正: リスト全体を指定
                                 },
                             colors = IconButtonDefaults.colors(
                                 containerColor = colors.surface.copy(alpha = 0.5f),
@@ -304,7 +324,7 @@ fun EpgNavigationContainer(
                             isSearching = isSearching,
                             reserves = reserves,
                             onProgramClick = { onProgramSelected(it) },
-                            firstItemFocusRequester = searchResultsFirstItemRequester,
+                            listFocusRequester = searchResultsListRequester, // ★修正: 変数名を変更
                             backButtonFocusRequester = searchResultsBackButtonRequester
                         )
                     }
@@ -312,9 +332,6 @@ fun EpgNavigationContainer(
             }
         }
 
-        // ==========================================
-        // 検索バーオーバーレイ
-        // ==========================================
         AnimatedVisibility(
             visible = isSearchBarVisible,
             enter = fadeIn(), exit = fadeOut(),
@@ -489,9 +506,6 @@ fun EpgNavigationContainer(
             }
         }
 
-        // ==========================================
-        // 日時指定ジャンプメニュー
-        // ==========================================
         AnimatedVisibility(
             visible = isJumpMenuOpen, enter = fadeIn(), exit = fadeOut(),
             modifier = Modifier.zIndex(10f)

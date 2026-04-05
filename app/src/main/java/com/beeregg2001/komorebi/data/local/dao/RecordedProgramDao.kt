@@ -42,6 +42,10 @@ interface RecordedProgramDao {
     @Query("SELECT * FROM recorded_programs WHERE strftime('%w', substr(start_time, 1, 10)) = :dayOfWeek ORDER BY start_time DESC")
     fun getPagingSourceByDayOfWeek(dayOfWeek: String): PagingSource<Int, RecordedProgramEntity>
 
+    // RecordedProgramDao.kt の中に追加するメソッド
+    @Query("SELECT id FROM recorded_programs WHERE is_recording = 1")
+    suspend fun getRecordingProgramIds(): List<Int>
+
     @Query(
         """
         SELECT * FROM recorded_programs 

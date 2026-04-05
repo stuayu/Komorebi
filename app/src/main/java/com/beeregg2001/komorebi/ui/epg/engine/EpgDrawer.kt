@@ -30,9 +30,6 @@ import java.time.OffsetDateTime
 import java.time.format.TextStyle as JavaTextStyle
 import java.util.*
 
-/**
- * 番組表のアニメーション・スクロール状態を保持するデータクラス
- */
 data class EpgAnimValues(
     val scrollX: Float,
     val scrollY: Float,
@@ -41,11 +38,6 @@ data class EpgAnimValues(
     val animH: Float
 )
 
-/**
- * 番組表の描画を担うコアクラス。
- * Compose標準のLazyList等を使わず、Canvas(DrawScope)上で直接矩形やテキストを描画することで、
- * 膨大な番組データでも処理落ちしない高速で滑らかなスクロールを実現しています。
- */
 class EpgDrawer(
     private val config: EpgConfig,
     private val textMeasurer: TextMeasurer
@@ -58,7 +50,8 @@ class EpgDrawer(
         logoPainters: List<Painter>,
         isGridFocused: Boolean,
         reserveMap: Map<String, ReserveItem>,
-        clockPainter: Painter
+        clockPainter: Painter,
+        timeFormat: String // ★ 追加: SettingsViewModelから渡される時間フォーマット("12H" or "24H")
     ) {
         with(drawScope) {
             val curX = animValues.scrollX
@@ -66,7 +59,6 @@ class EpgDrawer(
             val nowTime = OffsetDateTime.now()
             val nowMs = System.currentTimeMillis()
 
-            // テーマがダークモードかライトモードかを判定
             val isDarkTheme = config.colorBg.luminance() < 0.5f
 
             // ==========================================
@@ -96,7 +88,6 @@ class EpgDrawer(
                             val p = uiProg.program
 
                             val reserve = reserveMap[p.id]
-
                             val isPartial =
                                 reserve != null && (reserve.recordingAvailability == "Partial" || reserve.recordingAvailability == "Partially")
                             val isDuplicated =
@@ -123,7 +114,6 @@ class EpgDrawer(
                                     val majorGenre = p.genres?.firstOrNull()?.major
                                     val genreColor = EpgUtils.getGenreColor(majorGenre)
 
-                                    // 通常時のパステルグラデーション
                                     val startAlpha =
                                         if (isPast) (if (isDarkTheme) 0.1f else 0.03f) else (if (isDarkTheme) 0.2f else 0.06f)
                                     val endAlpha =
@@ -321,11 +311,7 @@ class EpgDrawer(
                     val isPast = endTimeMs > 0 && endTimeMs < nowMs
                     val isEmpty = p.title == "（番組情報なし）"
 
-                    // 背景の映像（透過）を遮断するため、純粋な白またはダークグレーをベースとします
                     val opaqueBase = if (isDarkTheme) Color(0xFF1A1A1A) else Color.White
-
-                    // [解説: 背景色は通常セルと全く同じ]
-                    // 特別な色付けをせず、グリッドの通常セルと全く同じベースカラーを採用します。
                     val bgColor = when {
                         isPartial -> config.colorReserveBorderPartial.copy(alpha = 0.2f)
                             .compositeOver(opaqueBase)
@@ -336,12 +322,10 @@ class EpgDrawer(
                         else -> config.colorProgramNormal.compositeOver(opaqueBase)
                     }
 
-                    // 塗りつぶし描画
                     if (!isEmpty) {
                         val majorGenre = p.genres?.firstOrNull()?.major
                         val genreColor = EpgUtils.getGenreColor(majorGenre)
 
-                        // グリッドと全く同じグラデーションを再現
                         val startAlpha =
                             if (isPast) (if (isDarkTheme) 0.1f else 0.03f) else (if (isDarkTheme) 0.2f else 0.06f)
                         val endAlpha = if (isPast) 0.0f else (if (isDarkTheme) 0.05f else 0.01f)
@@ -362,7 +346,6 @@ class EpgDrawer(
                             topLeft = Offset(fx + 1f, fy + 1f),
                             size = Size(config.cwPx - 2f, (fh - 2f).coerceAtLeast(0f))
                         )
-
                         drawRect(
                             color = genreColor,
                             topLeft = Offset(fx + 1f, fy + 1f),
@@ -376,15 +359,12 @@ class EpgDrawer(
                         )
                     }
 
-                    // [解説: torne風シャドウ（グロー）効果]
-                    // 枠線の周囲に透明度の高いStrokeを重ねて描画し、浮き上がるような光を表現します
                     val shadowColor = if (isDarkTheme) config.colorFocusBorder else Color.Black
                     for (i in 6 downTo 1) {
-                        val alpha = if (isDarkTheme) {
-                            (0.5f - (i * 0.08f)).coerceIn(0f, 1f)
-                        } else {
-                            (0.25f - (i * 0.04f)).coerceIn(0f, 1f)
-                        }
+                        val alpha = if (isDarkTheme) (0.5f - (i * 0.08f)).coerceIn(
+                            0f,
+                            1f
+                        ) else (0.25f - (i * 0.04f)).coerceIn(0f, 1f)
                         drawRoundRect(
                             color = shadowColor.copy(alpha = alpha),
                             topLeft = Offset(fx - i * 1.5f, fy - i * 1.5f),
@@ -394,7 +374,6 @@ class EpgDrawer(
                         )
                     }
 
-                    // テキストとアイコンの描画（文字色も通常セルと全く同じにします）
                     val iconSize = 12.sp.toPx()
                     val iconPadding = 2.dp.toPx()
                     val iconOffset = if (reserve != null) iconSize + iconPadding else 0f
@@ -450,10 +429,7 @@ class EpgDrawer(
                         } else {
                             val clockColor =
                                 if (isPartial) config.colorReserveBorderPartial else Color.Red
-                            translate(
-                                left = fx + 10f,
-                                top = iconY
-                            ) {
+                            translate(left = fx + 10f, top = iconY) {
                                 with(clockPainter) {
                                     draw(
                                         size = Size(iconSize, iconSize),
@@ -465,9 +441,10 @@ class EpgDrawer(
                     }
 
                     drawText(titleLayout, topLeft = Offset(fx + 10f + iconOffset, titleY))
-                    if (descLayout != null) {
-                        drawText(descLayout, topLeft = Offset(fx + 10f, titleY + titleH + 4f))
-                    }
+                    if (descLayout != null) drawText(
+                        descLayout,
+                        topLeft = Offset(fx + 10f, titleY + titleH + 4f)
+                    )
 
                     if (reserve != null) {
                         val borderColor =
@@ -482,7 +459,6 @@ class EpgDrawer(
                         )
                     }
 
-                    // 最も外側のハイライト枠線
                     drawRoundRect(
                         config.colorFocusBorder,
                         Offset(fx - 1f, fy - 1f),
@@ -513,23 +489,37 @@ class EpgDrawer(
                     }
                     drawRect(bgColor, Offset(0f, fy), Size(config.twPx, config.hhPx))
 
-                    val amPmLayout =
-                        textMeasurer.measure(if (hour < 12) "AM" else "PM", config.styleAmPm)
-                    val hourLayout = textMeasurer.measure(hour.toString(), config.styleTime)
-                    val startY =
-                        fy + (config.hhPx - (amPmLayout.size.height + hourLayout.size.height + 2f)) / 2
+                    // ★ 修正: timeFormat の設定に応じて描画を出し分ける
+                    if (timeFormat == "12H") {
+                        // 12時間表記 (AM/PM 付き)
+                        val displayHour = if (hour == 0) 12 else if (hour > 12) hour - 12 else hour
+                        val amPmLayout =
+                            textMeasurer.measure(if (hour < 12) "AM" else "PM", config.styleAmPm)
+                        val hourLayout =
+                            textMeasurer.measure(displayHour.toString(), config.styleTime)
 
-                    drawText(
-                        amPmLayout,
-                        topLeft = Offset((config.twPx - amPmLayout.size.width) / 2, startY)
-                    )
-                    drawText(
-                        hourLayout,
-                        topLeft = Offset(
-                            (config.twPx - hourLayout.size.width) / 2,
-                            startY + amPmLayout.size.height + 2f
+                        val startY =
+                            fy + (config.hhPx - (amPmLayout.size.height + hourLayout.size.height + 2f)) / 2
+                        drawText(
+                            amPmLayout,
+                            topLeft = Offset((config.twPx - amPmLayout.size.width) / 2, startY)
                         )
-                    )
+                        drawText(
+                            hourLayout,
+                            topLeft = Offset(
+                                (config.twPx - hourLayout.size.width) / 2,
+                                startY + amPmLayout.size.height + 2f
+                            )
+                        )
+                    } else {
+                        // 24時間表記 (AM/PM なしで数字だけを中央に大きく表示)
+                        val hourLayout = textMeasurer.measure(hour.toString(), config.styleTime)
+                        val startY = fy + (config.hhPx - hourLayout.size.height) / 2
+                        drawText(
+                            hourLayout,
+                            topLeft = Offset((config.twPx - hourLayout.size.width) / 2, startY)
+                        )
+                    }
 
                     drawLine(config.colorGridLine, Offset(0f, fy), Offset(config.twPx, fy), 3f)
                 }
@@ -573,7 +563,12 @@ class EpgDrawer(
                                             (logoH - srcSize.height * sc) / 2
                                         ) {
                                             with(painter) {
-                                                draw(Size(srcSize.width * sc, srcSize.height * sc))
+                                                draw(
+                                                    Size(
+                                                        srcSize.width * sc,
+                                                        srcSize.height * sc
+                                                    )
+                                                )
                                             }
                                         }
                                     }
@@ -603,7 +598,6 @@ class EpgDrawer(
                                 6f + logoH + 2f
                             )
                         )
-
                         drawLine(
                             config.colorGridLine,
                             Offset(x, 0f),
@@ -633,9 +627,10 @@ class EpgDrawer(
                     text = "$dateStr\n$dayStr",
                     spanStyles = listOf(
                         AnnotatedString.Range(
-                            SpanStyle(color = config.colorTextPrimary, fontSize = 11.sp),
-                            0,
-                            dateStr.length
+                            SpanStyle(
+                                color = config.colorTextPrimary,
+                                fontSize = 11.sp
+                            ), 0, dateStr.length
                         ),
                         AnnotatedString.Range(
                             SpanStyle(color = dayColor, fontSize = 11.sp),

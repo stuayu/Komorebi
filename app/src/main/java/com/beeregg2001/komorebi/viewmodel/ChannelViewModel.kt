@@ -29,6 +29,67 @@ class ChannelViewModel @Inject constructor(
     private val _groupedChannels = MutableStateFlow<Map<String, List<Channel>>>(emptyMap())
     val groupedChannels: StateFlow<Map<String, List<Channel>>> = _groupedChannels
 
+    // ★修正: HomeViewModelの精巧な野球判定ロジックをライブチャンネル抽出にも適用
+    private val baseballKeywords = listOf(
+        "阪神", "タイガース", "広島", "カープ", "DeNA", "ベイスターズ",
+        "巨人", "ジャイアンツ", "ヤクルト", "スワローズ", "中日", "ドラゴンズ",
+        "オリックス", "バファローズ", "ロッテ", "マリーンズ", "ソフトバンク", "ホークス",
+        "楽天", "イーグルス", "西武", "ライオンズ", "日本ハム", "ファイターズ", "プロ野球"
+    )
+
+    private val excludeKeywords = listOf(
+        "特集", "ヴィンテージ", "ハイライト", "ダイジェスト", "ニュース",
+        "名勝負", "傑作選", "セレクション", "トラリンク", "ガンガン！",
+        "伝説", "回顧", "すぽると", "熱闘", "プロ野球ニュース"
+    )
+
+    private val matchKeywords = listOf("中継", "対", "×", "vs", "戦", "生放送", "LIVE")
+
+    val baseballGroupedChannels: StateFlow<Map<String, List<Channel>>> =
+        _groupedChannels.map { grouped ->
+            val filtered = grouped.mapValues { (_, channels) ->
+                channels.filter { ch ->
+                    val title = ch.programPresent?.title ?: ""
+                    val desc = ch.programPresent?.description ?: ""
+                    val nextTitle = ch.programFollowing?.title ?: ""
+                    val nextDesc = ch.programFollowing?.description ?: ""
+
+                    // 1. 球団名または「プロ野球」が含まれているか
+                    val hasKeyword = baseballKeywords.any { keyword ->
+                        title.contains(keyword) || desc.contains(keyword) ||
+                                nextTitle.contains(keyword) || nextDesc.contains(keyword)
+                    }
+                    if (!hasKeyword) return@filter false
+
+                    // 2. 過去の試合やニュース番組ではないか（除外キーワード）
+                    val isExcluded = excludeKeywords.any { keyword ->
+                        title.contains(keyword) || nextTitle.contains(keyword)
+                    }
+                    if (isExcluded) return@filter false
+
+                    // 3. 実際の「試合中継」であるか（マッチキーワード）
+                    val isMatch = matchKeywords.any { keyword ->
+                        title.contains(keyword, ignoreCase = true) ||
+                                desc.contains(keyword, ignoreCase = true) ||
+                                nextTitle.contains(keyword, ignoreCase = true) ||
+                                nextDesc.contains(keyword, ignoreCase = true)
+                    }
+
+                    // スポーツジャンルの判定（EpgProgramと違い、ChannelのProgramにはGenre情報が文字列やIDで来るケースがあるため、
+                    // 今回はタイトルと説明文による精度の高いキーワードマッチング（isMatch）を最終判定の軸とします）
+                    isMatch
+                }
+            }.filterValues { it.isNotEmpty() }
+
+            if (filtered.isEmpty()) grouped else filtered
+        }
+            .flowOn(Dispatchers.Default) // ★最適化: Map内の重い文字列判定をバックグラウンドスレッドで実行
+            .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyMap()
+        )
+
     private val _recentRecordings = MutableStateFlow<List<RecordedProgram>>(emptyList())
     val recentRecordings: StateFlow<List<RecordedProgram>> = _recentRecordings
 
@@ -41,7 +102,6 @@ class ChannelViewModel @Inject constructor(
     private var pollingJob: Job? = null
     private var progressUpdateJob: Job? = null
 
-    // ★追加: 単発のフェッチ処理を管理するJob（ポーリングとは別枠にする）
     private var fetchJob: Job? = null
 
     init {
@@ -132,7 +192,6 @@ class ChannelViewModel @Inject constructor(
             _groupedChannels.value = processed
             _liveRows.value = transformToUiState(processed)
         } catch (e: CancellationException) {
-            // ★追加: コルーチンキャンセルの場合はエラーとして扱わず、静かに終了する
             Log.d("ChannelViewModel", "fetchChannelsInternal cancelled")
             throw e
         } catch (e: Exception) {
@@ -156,7 +215,6 @@ class ChannelViewModel @Inject constructor(
         }
     }
 
-    // ★修正: 単発のフェッチは、ポーリングがキャンセルされても生き残るように fetchJob に割り当てる
     @RequiresApi(Build.VERSION_CODES.O)
     fun fetchChannels() {
         _isLoading.value = true
@@ -193,8 +251,6 @@ class ChannelViewModel @Inject constructor(
 
     fun stopPolling() {
         pollingJob?.cancel()
-        // progressUpdateJob はUIのプログレスバーを更新するものなので、他タブにいても止めるべきか要検討ですが、
-        // 今回は元の仕様通り止めておきます（リソース節約のため）。
         progressUpdateJob?.cancel()
     }
 

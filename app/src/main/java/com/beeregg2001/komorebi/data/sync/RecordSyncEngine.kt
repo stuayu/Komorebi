@@ -36,9 +36,6 @@ import javax.inject.Singleton
 
 private const val TAG = "RecordSyncEngine"
 
-/**
- * 同期処理の進捗状況をUI層に伝えるためのデータクラス。
- */
 data class SyncProgress(
     val isSyncing: Boolean = false,
     val isInitialBuild: Boolean = false,
@@ -56,11 +53,6 @@ data class SyncProgress(
         }
 }
 
-/**
- * KonomiTVの録画番組データをローカルデータベース（Room）と同期するためのコアエンジンです。
- * ページネーション処理、差分更新、OOM（メモリ不足）対策、不要データの削除、
- * およびバックグラウンドでの「AI名寄せ（シリーズ辞書の自動生成）」を統括します。
- */
 @Singleton
 class RecordSyncEngine @Inject constructor(
     private val apiService: KonomiApi,
@@ -72,37 +64,26 @@ class RecordSyncEngine @Inject constructor(
     private val _syncProgress = MutableStateFlow(SyncProgress())
     val syncProgress: StateFlow<SyncProgress> = _syncProgress.asStateFlow()
 
-    // エンジン全体で共有するコルーチンスコープ（親ジョブがキャンセルされても他のジョブに影響しないSupervisorJob）
     private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // 複数スレッドやユーザー操作からの同時実行を防ぐための排他制御（Mutex）群
-    private val syncMutex = Mutex()         // 全件同期の重複実行ブロック用
-    private val jobMutex = Mutex()          // ジョブ参照の書き換え保護用
-    private val dictionaryMutex = Mutex()   // 辞書生成ループの重複実行ブロック用
-
-    private val smartSyncMutex = Mutex()    // スマート同期の重複実行ブロック用
+    private val syncMutex = Mutex()
+    private val jobMutex = Mutex()
+    private val dictionaryMutex = Mutex()
+    private val smartSyncMutex = Mutex()
     private var activeSyncJob: Job? = null
 
-    // ★低メモリ端末（Fire TV Stick等）の判定
     private val isLowRamDevice: Boolean by lazy {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         am.isLowRamDevice
     }
 
-    // ★低メモリ端末ではバッチサイズを小さく、通常端末では大きくする
     private val BATCH_SIZE get() = if (isLowRamDevice) 30 else 100
-
-    // ★低メモリ端末ではGC後の待機時間を長くする
     private val GC_DELAY_MS get() = if (isLowRamDevice) 2000L else 1200L
 
     fun clearError() {
         _syncProgress.value = _syncProgress.value.copy(error = null)
     }
 
-    /**
-     * 全件同期を開始するための公開エントリーポイント。
-     * すでに同期中の場合は重複実行をスキップします。
-     */
     fun launchSyncAllRecords(forceFullSync: Boolean = false) {
         if (!forceFullSync && syncMutex.isLocked) {
             Log.i(TAG, "launchSyncAllRecords: sync already running. Skipping.")
@@ -114,23 +95,15 @@ class RecordSyncEngine @Inject constructor(
         }
     }
 
-    /**
-     * スマート同期を開始するための公開エントリーポイント。
-     */
     fun launchSmartSync() {
         engineScope.launch {
             smartSync()
         }
     }
 
-    // 既存機能を崩さないよう public のままにしますが、外部からは必ず launchSyncAllRecords を使わせます
-    /**
-     * 録画データの全件同期（または途中からの再開）を行うメインロジック。
-     */
     suspend fun syncAllRecords(forceFullSync: Boolean = false) {
         val currentJob = currentCoroutineContext().job
 
-        // 強制フル同期が要求された場合、現在走っている同期ジョブをキャンセルして待機する
         var jobToJoin: Job? = null
         if (forceFullSync) {
             jobMutex.withLock {
@@ -153,7 +126,6 @@ class RecordSyncEngine @Inject constructor(
                     val metaDao = db.syncMetaDao()
                     val programDao = db.recordedProgramDao()
 
-                    // 同期の進捗状況（どこまでページを読み込んだか）を復元
                     var currentMeta = metaDao.getSyncMeta() ?: SyncMetaEntity(
                         id = 1,
                         lastSyncedPage = 0,
@@ -161,7 +133,6 @@ class RecordSyncEngine @Inject constructor(
                         isInitialBuildCompleted = false
                     )
 
-                    // 強制フル同期の場合はローカルの全データと進捗を初期化
                     if (forceFullSync) {
                         programDao.clearAll()
                         aiSeriesDictionaryDao.clearAll()
@@ -180,20 +151,15 @@ class RecordSyncEngine @Inject constructor(
                         message = "$baseMessage (接続中)"
                     )
 
-                    // 前回中断した次のページから再開する（フル同期なら1ページ目から）
                     var currentPage =
                         if (currentMeta.lastSyncedPage > 0 && !forceFullSync) currentMeta.lastSyncedPage + 1 else 1
                     val isResumed = currentPage > 1
                     var isCompleted = false
                     var processedCount = if (isResumed) programDao.getAllIds().size else 0
 
-                    // 初期構築（全件取得）の場合のみ、サーバーから消えたデータを特定するためのセットを用意
                     val needsOrphanDeletion = !isResumed && (isInitial || forceFullSync)
                     val allFetchedIds = if (needsOrphanDeletion) mutableSetOf<Int>() else null
 
-                    // ★低メモリ端末対応: isLowRamDeviceの場合は辞書をメモリに全展開せず空Mapを渡す。
-                    // series_nameの解決は後続の startDictionaryResolutionLoop() で行われるため
-                    // 初回ビルドの品質への影響はなく、OOM発生を回避できる。
                     val dictionary: Map<String, String> = if (isLowRamDevice && isInitial) {
                         Log.i(TAG, "Low RAM device: skipping dictionary preload to save memory.")
                         emptyMap()
@@ -204,7 +170,6 @@ class RecordSyncEngine @Inject constructor(
 
                     val entityBuffer = mutableListOf<RecordedProgramEntity>()
 
-                    // ページ単位でAPIから録画番組を取得するループ
                     while (!isCompleted) {
                         currentCoroutineContext().ensureActive()
 
@@ -212,7 +177,6 @@ class RecordSyncEngine @Inject constructor(
                         val response = apiService.getRecordedPrograms(page = currentPage)
                         val programs = response.recordedPrograms
 
-                        // サーバー側からのデータが空になれば取得完了
                         if (programs.isEmpty()) {
                             isCompleted = true
                             break
@@ -222,9 +186,7 @@ class RecordSyncEngine @Inject constructor(
                             val entities = programs.map { RecordDataMapper.toEntity(it) }
                             allFetchedIds?.addAll(entities.map { it.id })
 
-                            // 差分更新時の最適化：
-                            // 取得したページ内の番組群が、ローカルDBの番組群と「順序も含めて」完全に一致した場合、
-                            // これ以降の古いページに変更はないと判断して同期を打ち切る
+                            // ★ 修正: フル同期・レジューム時も録画ステータスの変化を検知して更新を継続させる
                             if (currentMeta.isInitialBuildCompleted && !forceFullSync) {
                                 val pageIds = entities.map { it.id }
                                 val localEntitiesMap =
@@ -233,15 +195,21 @@ class RecordSyncEngine @Inject constructor(
                                 val allPageItemsMatch =
                                     entities.size == localEntitiesMap.size && entities.all { entity ->
                                         val local = localEntitiesMap[entity.id]
-                                        local != null && local.title == entity.title
+                                        local != null &&
+                                                local.title == entity.title &&
+                                                local.isRecording == entity.isRecording
                                     }
-                                if (allPageItemsMatch) {
+
+                                // ローカルに「録画中」の番組が残っていないかも確認するフェイルセーフ
+                                val hasLocalRecording =
+                                    localEntitiesMap.values.any { it.isRecording }
+
+                                if (allPageItemsMatch && !hasLocalRecording) {
                                     isCompleted = true
                                     return@run
                                 }
                             }
 
-                            // 辞書引きによるシリーズ名（名寄せキー）の割り当て
                             val enrichedEntities = entities.map { entity ->
                                 val baseTitle = TitleNormalizer.extractDisplayTitle(entity.title)
                                 val finalSeriesName = dictionary[entity.title] ?: baseTitle
@@ -254,7 +222,6 @@ class RecordSyncEngine @Inject constructor(
                         val processedThisTime = programs.size
                         val totalCount = response.total.takeIf { it > 0 } ?: 0
 
-                        // バッチサイズ（端末スペックに応じて可変）に達したらDBに書き込む
                         if (entityBuffer.size >= BATCH_SIZE) {
                             db.withTransaction {
                                 programDao.upsertAll(entityBuffer)
@@ -286,10 +253,6 @@ class RecordSyncEngine @Inject constructor(
                             isCompleted = true
                         } else {
                             currentPage++
-                            // ★修正 OOM対策:
-                            // Fire TV 等の低メモリ端末でGC(ガベージコレクション)が追いつくよう、
-                            // 明示的にヒントを出しつつ長めの休憩（1.2秒）を取らせる。
-                            // これにより数千件のデータでもメモリがパンクせずに完走します。
                             if (isInitial) {
                                 System.gc()
                                 delay(GC_DELAY_MS)
@@ -299,7 +262,6 @@ class RecordSyncEngine @Inject constructor(
                         }
                     }
 
-                    // ループ終了後にバッファに残っている端数をDBに書き込む
                     if (entityBuffer.isNotEmpty()) {
                         db.withTransaction {
                             programDao.upsertAll(entityBuffer)
@@ -314,20 +276,17 @@ class RecordSyncEngine @Inject constructor(
                     }
 
                     if (isCompleted) {
-                        // サーバーから削除された番組（孤児レコード）をローカルDBからも削除する
                         if (needsOrphanDeletion && allFetchedIds != null && allFetchedIds.isNotEmpty()) {
                             val localIds = programDao.getAllIds()
                             val idsToDelete = localIds.toSet() - allFetchedIds
                             if (idsToDelete.isNotEmpty()) {
                                 Log.i(TAG, "Deleting ${idsToDelete.size} orphan records.")
-                                // 一度に大量に削除するとSQLiteの上限に引っかかるため分割(chunk)して削除
                                 idsToDelete.chunked(900).forEach { chunk ->
                                     programDao.deleteByIds(chunk)
                                 }
                             }
                         }
 
-                        // 初期構築完了フラグを立てる
                         metaDao.upsert(
                             currentMeta.copy(
                                 lastSyncedAt = System.currentTimeMillis(),
@@ -363,7 +322,6 @@ class RecordSyncEngine @Inject constructor(
             }
         }
 
-        // 同期が正常に完了した場合、バックグラウンドで名寄せ辞書の生成処理をキックする
         if (isSyncSuccessful) {
             engineScope.launch {
                 startDictionaryResolutionLoop()
@@ -372,7 +330,6 @@ class RecordSyncEngine @Inject constructor(
     }
 
     suspend fun clearDatabase() {
-        // ★修正: 他の処理中に呼ばれてもクラッシュしないよう排他ロックをかける
         syncMutex.withLock {
             withContext(Dispatchers.IO) {
                 db.recordedProgramDao().clearAll()
@@ -389,11 +346,6 @@ class RecordSyncEngine @Inject constructor(
         }
     }
 
-    /**
-     * 高速な差分同期（スマート同期）処理。
-     * 最新の1ページ目のみを取得し、ローカルDBと完全に一致すれば「変更なし」とみなして即座に終了します。
-     * 録画の追加や削除があった場合のみDBを更新する、通信量・負荷に優しいエコな同期機能です。
-     */
     suspend fun smartSync() {
         if (!smartSyncMutex.tryLock()) {
             Log.i(TAG, "smartSync: already running. Skipping.")
@@ -430,15 +382,20 @@ class RecordSyncEngine @Inject constructor(
                         val pageIds = entities.map { it.id }
                         val localEntitiesMap = programDao.getByIds(pageIds).associateBy { it.id }
 
-                        // 1ページ目の要素がすべてローカルDBの最新情報と一致しているかチェック
+                        // ★ 修正: タイトルだけでなく、録画ステータス（isRecording）と録画時間（duration）も比較する
                         val allPageItemsMatch =
                             entities.size == localEntitiesMap.size && entities.all { entity ->
                                 val local = localEntitiesMap[entity.id]
-                                local != null && local.title == entity.title
+                                local != null &&
+                                        local.title == entity.title &&
+                                        local.isRecording == entity.isRecording
                             }
 
-                        // もし差分があれば（録画が追加された、メタデータが更新された等）、1ページ目だけを上書き
-                        if (!allPageItemsMatch) {
+                        // ★ 追加: ローカルDBに「録画中」のまま残っている古い番組がないかをフェイルセーフでチェック
+                        val hasLocalRecording = localEntitiesMap.values.any { it.isRecording }
+
+                        // 完全に一致しており、かつローカルに録画中の番組も残っていなければ、更新不要とみなす
+                        if (!allPageItemsMatch || hasLocalRecording) {
                             val dictionary = aiSeriesDictionaryDao.getAllDictionary()
                                 .associate { it.originalTitle to it.normalizedSeriesName }
 
@@ -449,6 +406,12 @@ class RecordSyncEngine @Inject constructor(
                             }
 
                             db.withTransaction { programDao.upsertAll(enrichedEntities) }
+                            Log.i(
+                                TAG,
+                                "smartSync: Detected changes or stuck recordings. Updated DB."
+                            )
+                        } else {
+                            Log.i(TAG, "smartSync: No changes detected. Skipped.")
                         }
 
                         isSyncSuccessful = true
@@ -465,7 +428,6 @@ class RecordSyncEngine @Inject constructor(
                 }
             }
 
-            // 更新があった番組が辞書に未登録の新しい番組名だった場合、辞書解決ループを回す
             if (isSyncSuccessful) {
                 if (!dictionaryMutex.isLocked) {
                     engineScope.launch { startDictionaryResolutionLoop() }
@@ -479,12 +441,6 @@ class RecordSyncEngine @Inject constructor(
         }
     }
 
-    /**
-     * バックグラウンドで実行される「シリーズ名寄せ（辞書生成）」のループ処理。
-     * 正規化されていない（Unknownな）番組名をDBから抽出し、
-     * Wikipedia APIを叩いて正式なシリーズ名を取得し、辞書と番組データを更新します。
-     * Wikipedia API のレートリミットを回避するため、意図的な遅延（delay）を入れて処理します。
-     */
     private suspend fun startDictionaryResolutionLoop() {
         if (!dictionaryMutex.tryLock()) {
             Log.i(TAG, "Dictionary resolution is already running. Skipping.")
@@ -497,7 +453,6 @@ class RecordSyncEngine @Inject constructor(
             withContext(Dispatchers.IO) {
                 val programDao = db.recordedProgramDao()
 
-                // まだ辞書解決されていない番組の数をカウント
                 val totalUnknown = programDao.getUnknownTitlesCount()
                 Log.i(TAG, "startDictionaryResolutionLoop: totalUnknown=$totalUnknown")
 
@@ -525,7 +480,6 @@ class RecordSyncEngine @Inject constructor(
 
                 while (true) {
                     currentCoroutineContext().ensureActive()
-                    // 50件ずつフェッチして処理
                     val unknownTitles = programDao.getUnknownTitles(limit = 50)
                     if (unknownTitles.isEmpty()) break
 
@@ -535,7 +489,6 @@ class RecordSyncEngine @Inject constructor(
                         currentCoroutineContext().ensureActive()
                         val baseTitle = TitleNormalizer.extractDisplayTitle(title)
 
-                        // Wikipedia APIで名寄せのための正規タイトルを取得
                         val canonicalTitle = try {
                             WikipediaNormalizer.getCanonicalTitle(baseTitle)
                         } catch (e: CancellationException) {
@@ -548,7 +501,6 @@ class RecordSyncEngine @Inject constructor(
                             null
                         }
 
-                        // APIの叩きすぎを防ぐ（レートリミット対策）
                         delay(300)
 
                         val finalSeriesName = canonicalTitle ?: baseTitle
@@ -564,7 +516,6 @@ class RecordSyncEngine @Inject constructor(
                         )
                     }
 
-                    // 生成した辞書エントリを保存し、紐づく番組データの seriesName を一括更新
                     if (newDictEntries.isNotEmpty()) {
                         db.withTransaction {
                             aiSeriesDictionaryDao.insertAll(newDictEntries)
@@ -577,7 +528,6 @@ class RecordSyncEngine @Inject constructor(
                         }
                     }
 
-                    // まだ残っていれば、少し休憩してから次のバッチへ
                     val hasMore = programDao.getUnknownTitlesCount() > 0
                     if (hasMore) delay(2000)
                 }

@@ -37,7 +37,8 @@ class SettingPreferences(
     val excludePaid: String,
     val pickupTime: String,
     val startupTab: String,
-    val startupChannel: String, // ★追加
+    val startupChannel: String,
+    val timeFormat: String, // ★ 追加: 時間表記フォーマット
     val currentThemeName: String,
     val defaultRecordListView: String
 )
@@ -93,7 +94,8 @@ fun rememberSettingPreferences(repository: SettingsRepository): SettingPreferenc
         excludePaid = repository.excludePaidBroadcasts.collectAsState(initial = "ON").value,
         pickupTime = repository.homePickupTime.collectAsState(initial = "自動").value,
         startupTab = repository.startupTab.collectAsState(initial = "ホーム").value,
-        startupChannel = repository.startupChannel.collectAsState(initial = "OFF").value, // ★追加
+        startupChannel = repository.startupChannel.collectAsState(initial = "OFF").value,
+        timeFormat = repository.timeFormat.collectAsState(initial = "24H").value, // ★ 追加
         currentThemeName = repository.appTheme.collectAsState(initial = "MONOTONE").value,
         defaultRecordListView = repository.defaultRecordListView.collectAsState(initial = "LIST").value
     )

@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.OffsetDateTime
-import java.time.temporal.ChronoUnit
 
 private const val TAG = "EPG_STATE"
 
@@ -65,17 +64,22 @@ class EpgState(
     var screenWidthPx by mutableFloatStateOf(0f)
     var screenHeightPx by mutableFloatStateOf(0f)
 
-    // ★修正: ぴったり24時間（60分 × 24時間）
+    // ぴったり24時間（60分 × 24時間）
     val maxScrollMinutes = 60 * 24
 
-    suspend fun updateData(newData: List<EpgChannelWrapper>, targetTime: OffsetDateTime, resetFocus: Boolean = false) {
+    suspend fun updateData(
+        newData: List<EpgChannelWrapper>,
+        targetTime: OffsetDateTime,
+        resetFocus: Boolean = false
+    ) {
         isCalculating = true
         withContext(Dispatchers.Default) {
             try {
-                // ★修正: targetTimeからその日の「朝4時」を起算してベースにする
-                val newBaseTime = targetTime.withHour(4).withMinute(0).withSecond(0).withNano(0).let {
-                    if (targetTime.hour < 4) it.minusDays(1) else it
-                }
+                // targetTimeからその日の「朝4時」を起算してベースにする
+                val newBaseTime =
+                    targetTime.withHour(4).withMinute(0).withSecond(0).withNano(0).let {
+                        if (targetTime.hour < 4) it.minusDays(1) else it
+                    }
                 val newLimitTime = newBaseTime.plusMinutes(maxScrollMinutes.toLong())
 
                 val newUiChannels = newData.map { wrapper ->
@@ -88,8 +92,13 @@ class EpgState(
                         val height = (dur / 60f) * config.hhPx
                         val isEmpty = p.title == "（番組情報なし）"
                         val endMs = try {
-                            EpgDataConverter.safeParseTime(p.end_time, newBaseTime.plusMinutes(sOff.toLong() + dur.toLong())).toInstant().toEpochMilli()
-                        } catch (e: Exception) { 0L }
+                            EpgDataConverter.safeParseTime(
+                                p.end_time,
+                                newBaseTime.plusMinutes(sOff.toLong() + dur.toLong())
+                            ).toInstant().toEpochMilli()
+                        } catch (e: Exception) {
+                            0L
+                        }
                         UiProgram(p, topY, height, isEmpty, endMs)
                     }
                     UiChannel(wrapper.copy(programs = filled), uiProgs)
@@ -102,7 +111,7 @@ class EpgState(
                     filledChannelWrappers = newUiChannels.map { it.wrapper }
                     textLayoutCache.clear()
 
-                    // ★修正: データが来たら、無限スクロールのことは忘れて常に目的の時刻へジャンプする！
+                    // データが来たら常に目的の時刻へジャンプする
                     jumpToTime(targetTime)
                     isInitialized = true
                     isCalculating = false
@@ -178,8 +187,22 @@ class EpgState(
         val channel = uiChannels.getOrNull(safeCol) ?: return
 
         val focusY = (safeMin / 60f) * config.hhPx
-        val uiProg = channel.uiPrograms.find {
-            focusY >= it.topY && focusY < it.topY + it.height
+
+        // ★神修正: 浮動小数点の誤差や秒単位のズレによる「上のセルへの誤爆」「隙間落ち」を防ぐため、
+        // 判定用のY座標に 0.5分相当 のマージン（下方向への押し込み）を加える！
+        val searchY = focusY + ((0.5f / 60f) * config.hhPx)
+
+        var uiProg = channel.uiPrograms.find {
+            searchY >= it.topY && searchY < it.topY + it.height
+        }
+
+        // ★神修正: 時間の切り捨てによって生じた「空番組（隙間）」に落ちた場合は、
+        // 最も近い下方向の実在する番組を強制的に選択する（スキップや迷子の完全防止！）
+        if (uiProg == null || uiProg.isEmpty) {
+            uiProg = channel.uiPrograms.firstOrNull { it.topY + it.height > searchY && !it.isEmpty }
+        }
+        if (uiProg == null) {
+            uiProg = channel.uiPrograms.lastOrNull { !it.isEmpty }
         }
 
         currentFocusedProgram = uiProg?.program
@@ -222,5 +245,29 @@ class EpgState(
 
         targetScrollX = nextTargetX.coerceIn(maxScrollX, 0f)
         targetScrollY = nextTargetY.coerceIn(maxScrollY, 0f)
+    }
+
+    // 🌟 追加: EPGの魔法の「座標復元関数」
+    fun restoreFocus(
+        targetChannelId: String,
+        targetTime: OffsetDateTime
+    ) {
+        if (uiChannels.isEmpty()) return
+
+        // チャンネルIDからX座標（列）を特定
+        val colIndex = uiChannels.indexOfFirst { it.wrapper.channel.id == targetChannelId }
+        if (colIndex == -1) return
+
+        // 時間からY座標（分数）を特定
+        val minutesDiff = try {
+            Duration.between(baseTime, targetTime).toMinutes().toInt()
+        } catch (e: Exception) {
+            0
+        }
+
+        if (minutesDiff < 0 || minutesDiff > maxScrollMinutes) return
+
+        // 既存のメソッドを利用して強引にスクロール＆アニメーションを合わせる
+        updatePositionsInternal(colIndex, minutesDiff, forceScroll = false)
     }
 }

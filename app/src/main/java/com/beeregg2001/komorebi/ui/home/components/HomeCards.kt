@@ -39,7 +39,7 @@ fun LastWatchedChannelCard(
     logoUrl: String,
     onClick: () -> Unit,
     onFocus: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier // 🌟 追加
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
@@ -48,7 +48,7 @@ fun LastWatchedChannelCard(
 
     Surface(
         onClick = onClick,
-        modifier = modifier
+        modifier = modifier // 🌟 適用
             .width(220.dp)
             .height(96.dp)
             .onFocusChanged {
@@ -133,14 +133,15 @@ fun HotChannelCard(
     uiState: UiChannelState,
     logoUrl: String,
     onClick: () -> Unit,
-    onFocus: () -> Unit
+    onFocus: () -> Unit,
+    modifier: Modifier = Modifier // 🌟 追加
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
 
     Surface(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier // 🌟 適用
             .width(260.dp)
             .height(106.dp)
             .onFocusChanged {
@@ -224,7 +225,8 @@ fun WatchHistoryCard(
     konomiIp: String,
     konomiPort: String,
     onClick: () -> Unit,
-    onFocus: (progress: Float, thumbnailUrl: String) -> Unit
+    onFocus: (progress: Float, thumbnailUrl: String) -> Unit,
+    modifier: Modifier = Modifier // 🌟 追加
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
@@ -242,7 +244,7 @@ fun WatchHistoryCard(
 
     Surface(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier // 🌟 適用
             .width(260.dp)
             .height(146.dp)
             .onFocusChanged {
@@ -337,7 +339,8 @@ fun WatchHistoryCard(
 fun UpcomingReserveCard(
     reserve: ReserveItem,
     onClick: () -> Unit,
-    onFocus: (startFormat: String) -> Unit
+    onFocus: (startFormat: String) -> Unit,
+    modifier: Modifier = Modifier // 🌟 追加
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
@@ -346,7 +349,7 @@ fun UpcomingReserveCard(
 
     Surface(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier // 🌟 適用
             .width(240.dp)
             .height(106.dp)
             .onFocusChanged {
@@ -420,7 +423,8 @@ fun GenrePickupCard(
     channelName: String,
     timeSlot: String,
     onClick: () -> Unit,
-    onFocus: (startFormat: String) -> Unit
+    onFocus: (startFormat: String) -> Unit,
+    modifier: Modifier = Modifier // 🌟 追加
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
@@ -441,7 +445,7 @@ fun GenrePickupCard(
 
     Surface(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier // 🌟 適用
             .width(260.dp)
             .height(116.dp)
             .onFocusChanged {

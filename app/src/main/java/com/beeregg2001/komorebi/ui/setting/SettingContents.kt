@@ -435,11 +435,12 @@ fun HomeDisplaySettingsContent(
 @Composable
 fun DisplaySettingsContent(
     preferences: SettingPreferences,
-    startupChannelName: String, // ★追加: 変換済みのチャンネル名を受け取る
+    startupChannelName: String,
     sidebarR: FocusRequester,
     onEditTab: () -> Unit,
     onEditStartupChannel: () -> Unit,
     onEditDefaultView: () -> Unit,
+    onEditTimeFormat: () -> Unit, // ★ 追加
     itemRs: List<FocusRequester>,
     onClick: (FocusRequester) -> Unit
 ) {
@@ -463,7 +464,6 @@ fun DisplaySettingsContent(
                     },
                 onClick = { onClick(itemRs[0]); onEditTab() })
 
-            // ★修正: パラメータで渡された番組名を表示する
             SettingItem(
                 AppStrings.SETTINGS_ITEM_STARTUP_CHANNEL,
                 startupChannelName,
@@ -481,6 +481,16 @@ fun DisplaySettingsContent(
                     .focusRequester(itemRs[2])
                     .focusProperties { left = sidebarR },
                 onClick = { onClick(itemRs[2]); onEditDefaultView() })
+
+            // ★ 追加: 時刻の表示形式
+            SettingItem(
+                "時刻の表示形式 (ホーム・番組表)",
+                if (preferences.timeFormat == "12H") "12時間表記 (AM/PM)" else "24時間表記",
+                Icons.Default.Schedule,
+                modifier = Modifier
+                    .focusRequester(itemRs[3])
+                    .focusProperties { left = sidebarR },
+                onClick = { onClick(itemRs[3]); onEditTimeFormat() })
         }
     }
 }
@@ -569,17 +579,16 @@ fun CommentSettingsContent(
 
 @Composable
 fun LabSettingsContent(
-    annict: String, shobocal: String, postCmd: String,
-    enableAi: String, apiKey: String,
+    apiKey: String,
     baseball: Set<String>,
     mirakurunDual: String,
-    annictR: FocusRequester, shobocalR: FocusRequester, cmdR: FocusRequester,
-    enableAiR: FocusRequester, apiKeyR: FocusRequester,
-    baseballR: FocusRequester, dualR: FocusRequester,
+    dualR: FocusRequester,
+    baseballR: FocusRequester,
+    apiKeyR: FocusRequester,
     sidebarR: FocusRequester,
-    onAnnict: () -> Unit, onShobocal: () -> Unit, onEditCmd: () -> Unit,
-    onToggleAi: () -> Unit, onEditApiKey: () -> Unit,
-    onBaseball: () -> Unit, onToggleMirakurunDual: () -> Unit,
+    onEditApiKey: () -> Unit,
+    onBaseball: () -> Unit,
+    onToggleMirakurunDual: () -> Unit,
     onClick: (FocusRequester) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -618,23 +627,17 @@ fun LabSettingsContent(
             )
         }
 
-        SettingsSection(AppStrings.SETTINGS_SECTION_EXTERNAL_INTEGRATION) {
+        SettingsSection("AIコンシェルジュ (Gemini)") {
+            val isKeySet = apiKey.isNotBlank() && apiKey.startsWith("AIza")
             SettingItem(
-                AppStrings.SETTINGS_ITEM_ANNICT,
-                annict,
-                Icons.Default.Link,
+                title = "APIキー連携 (スマホで簡単設定)",
+                value = if (isKeySet) "設定済み" else "未設定",
+                icon = Icons.Default.AutoAwesome,
                 modifier = Modifier
-                    .focusRequester(annictR)
+                    .focusRequester(apiKeyR)
                     .focusProperties { left = sidebarR },
-                onClick = { onClick(annictR); onAnnict() })
-            SettingItem(
-                AppStrings.SETTINGS_ITEM_SHOBOCAL,
-                shobocal,
-                Icons.Default.EventNote,
-                modifier = Modifier
-                    .focusRequester(shobocalR)
-                    .focusProperties { left = sidebarR },
-                onClick = { onClick(shobocalR); onShobocal() })
+                onClick = { onClick(apiKeyR); onEditApiKey() }
+            )
         }
     }
 }
@@ -658,7 +661,7 @@ fun AppInfoContent(
             fontWeight = FontWeight.Bold
         )
         Text(
-            "Version 0.9.0 beta2",
+            "Version 1.0.0 beta",
             style = MaterialTheme.typography.titleMedium,
             color = KomorebiTheme.colors.textSecondary
         )

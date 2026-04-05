@@ -16,8 +16,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckBox // ★追加
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank // ★追加
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -46,6 +47,14 @@ import com.beeregg2001.komorebi.common.safeRequestFocus
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import kotlinx.coroutines.delay
 
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import androidx.compose.foundation.Image
+import androidx.compose.material3.CircularProgressIndicator
+
 sealed class SettingDialogState {
     object None : SettingDialogState()
     data class Input(val title: String, val initialValue: String, val onConfirm: (String) -> Unit) :
@@ -60,7 +69,6 @@ sealed class SettingDialogState {
         val onSelect: (String) -> Unit
     ) : SettingDialogState()
 
-    // ★追加: 複数選択可能なダイアログ（プロ野球球団など）用
     data class MultiSelection(
         val title: String,
         val options: List<Pair<String, String>>,
@@ -72,6 +80,8 @@ sealed class SettingDialogState {
         SettingDialogState()
 
     object Licenses : SettingDialogState()
+
+    object GeminiSetup : SettingDialogState()
 }
 
 data class Category(val name: String, val icon: ImageVector)
@@ -520,7 +530,6 @@ fun SelectionDialogItem(
     }
 }
 
-// ★追加: 複数選択（チェックボックス形式）用ダイアログコンポーネント
 @Composable
 fun MultiSelectionDialog(
     title: String,
@@ -530,7 +539,6 @@ fun MultiSelectionDialog(
     onConfirm: (Set<String>) -> Unit
 ) {
     val colors = KomorebiTheme.colors
-    // ローカルで選択状態を保持（確定ボタンが押されるまでは本体のStateには反映させない）
     var selections by remember { mutableStateOf(currentSelections) }
     val listState = rememberLazyListState()
 
@@ -568,7 +576,7 @@ fun MultiSelectionDialog(
         Surface(
             shape = RoundedCornerShape(16.dp),
             colors = SurfaceDefaults.colors(containerColor = colors.surface),
-            modifier = Modifier.width(460.dp) // 球団名などが長くなることを考慮して少し広めに
+            modifier = Modifier.width(460.dp)
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text(
@@ -581,7 +589,7 @@ fun MultiSelectionDialog(
                 LazyColumn(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.heightIn(max = 350.dp) // テレビ画面でのスクロール領域を確保
+                    modifier = Modifier.heightIn(max = 350.dp)
                 ) {
                     itemsIndexed(options) { index, (label, value) ->
                         val isSelected = selections.contains(value)
@@ -592,7 +600,6 @@ fun MultiSelectionDialog(
                             label = label,
                             isSelected = isSelected,
                             onClick = {
-                                // 選択/解除のトグル動作
                                 selections = if (isSelected) {
                                     selections - value
                                 } else {
@@ -637,7 +644,6 @@ fun MultiSelectionDialog(
     }
 }
 
-// ★追加: 複数選択ダイアログ用のチェックボックス付きアイテム
 @Composable
 fun MultiSelectionDialogItem(
     label: String,
@@ -753,6 +759,244 @@ fun ConfirmClearDialog(
                     ) { Text(AppStrings.BUTTON_DELETE) }
                 }
             }
+        }
+    }
+}
+
+// =========================================================================
+// ★追加: Gemini API キー設定用 QRコード表示画面 (Step 5)
+// =========================================================================
+@Composable
+fun GeminiSetupDialog(
+    currentKey: String,
+    serverIp: String,
+    onStartServer: () -> Unit,
+    onStopServer: () -> Unit,
+    onDismiss: () -> Unit,
+    onManualInputClick: () -> Unit,
+    onDeleteKey: () -> Unit // ★ 追加: 連携解除のコールバック
+) {
+    val colors = KomorebiTheme.colors
+    var isClosing by remember { mutableStateOf(false) }
+
+    val focusRequester = remember { FocusRequester() }
+
+    DisposableEffect(Unit) {
+        onStartServer()
+        onDispose { onStopServer() }
+    }
+
+    LaunchedEffect(Unit) {
+        delay(150)
+        focusRequester.safeRequestFocus()
+    }
+
+    val serverUrl = "http://$serverIp:8081"
+
+    val qrBitmap = rememberQrBitmap(content = serverUrl, size = 300)
+
+    val isKeySet = currentKey.isNotBlank() && currentKey.startsWith("AIza")
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(0.85f))
+            .focusProperties {
+                exit = { if (isClosing) FocusRequester.Default else FocusRequester.Cancel }
+            }
+            .focusGroup()
+            .onKeyEvent {
+                if (it.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_BACK) {
+                    if (it.type == KeyEventType.KeyUp) {
+                        isClosing = true
+                        onDismiss()
+                    }
+                    return@onKeyEvent true
+                }
+                false
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            colors = SurfaceDefaults.colors(containerColor = colors.surface),
+            modifier = Modifier.width(680.dp)
+        ) {
+            Column(modifier = Modifier.padding(40.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        null,
+                        tint = colors.accent,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Text(
+                        "AIコンシェルジュ連携 (Gemini)",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(Modifier.height(32.dp))
+
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    // 左側: 説明とステータス
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "連携ステータス",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.textSecondary
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if (isKeySet) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                null,
+                                tint = if (isKeySet) Color(0xFF34A853) else Color(0xFFFFB300),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (isKeySet) "設定済み (キー受信完了)" else "未設定",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Spacer(Modifier.height(32.dp))
+
+                        Text(
+                            "設定手順",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.accent,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "1. スマホのカメラで右のQRコードを読み取ります。",
+                            color = colors.textPrimary,
+                            style = MaterialTheme.typography.bodyLarge,
+                            lineHeight = 24.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "2. スマホの画面に従い、GoogleからAPIキーを取得して送信してください。",
+                            color = colors.textPrimary,
+                            style = MaterialTheme.typography.bodyLarge,
+                            lineHeight = 24.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "3. 送信後、上のステータスが「設定済み」になれば完了です！",
+                            color = colors.textPrimary,
+                            style = MaterialTheme.typography.bodyLarge,
+                            lineHeight = 24.sp
+                        )
+                    }
+
+                    Spacer(Modifier.width(32.dp))
+
+                    // 右側: QRコード
+                    Box(
+                        modifier = Modifier
+                            .size(220.dp)
+                            .background(Color.White, RoundedCornerShape(12.dp))
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (qrBitmap != null) {
+                            Image(
+                                bitmap = qrBitmap,
+                                contentDescription = "QR Code",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            CircularProgressIndicator(color = colors.accent)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(40.dp))
+
+                // ★ 修正: ボタンの配置を「設定済み」と「未設定」で分岐
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Button(
+                        onClick = { isClosing = true; onDismiss() },
+                        colors = ButtonDefaults.colors(
+                            containerColor = colors.textPrimary.copy(0.1f),
+                            contentColor = colors.textPrimary
+                        ),
+                        modifier = Modifier
+                            .width(180.dp)
+                            .focusRequester(focusRequester)
+                    ) {
+                        Text(if (isKeySet) "閉じる" else "キャンセル")
+                    }
+
+                    Spacer(Modifier.width(24.dp))
+
+                    if (isKeySet) {
+                        // 設定済みの場合：連携解除ボタン (赤色)
+                        Button(
+                            onClick = { isClosing = true; onDeleteKey() },
+                            colors = ButtonDefaults.colors(
+                                containerColor = Color(0xFFD32F2F),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.width(180.dp)
+                        ) {
+                            Text("連携を解除")
+                        }
+                    } else {
+                        // 未設定の場合：手動入力ボタン
+                        Button(
+                            onClick = { isClosing = true; onManualInputClick() },
+                            colors = ButtonDefaults.colors(
+                                containerColor = colors.textPrimary.copy(
+                                    0.1f
+                                ), contentColor = colors.textPrimary
+                            ),
+                            modifier = Modifier.width(180.dp)
+                        ) {
+                            Text("手動で入力")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// QRコードをBitmapに変換するヘルパー関数
+@Composable
+fun rememberQrBitmap(content: String, size: Int): androidx.compose.ui.graphics.ImageBitmap? {
+    return remember(content, size) {
+        try {
+            val hints = mapOf(EncodeHintType.MARGIN to 1)
+            val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size, hints)
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
+            for (x in 0 until size) {
+                for (y in 0 until size) {
+                    bmp.setPixel(
+                        x,
+                        y,
+                        if (bitMatrix.get(
+                                x,
+                                y
+                            )
+                        ) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                    )
+                }
+            }
+            bmp.asImageBitmap()
+        } catch (e: Exception) {
+            null
         }
     }
 }

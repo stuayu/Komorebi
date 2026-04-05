@@ -82,47 +82,108 @@ class EpgRepository @Inject constructor(
     }
     // ==========================================
 
+    // ==========================================
+    // ★ 修正: 将来の「詳細検索UI」にも完全対応する最強の検索エンジン
+    // ==========================================
     @RequiresApi(Build.VERSION_CODES.O)
-    fun searchFuturePrograms(query: String): List<EpgSearchResultItem> {
-        // ★修正: 検索クエリを正規化し、スペース区切りでキーワードのリスト（配列）にする
+    fun searchFuturePrograms(
+        query: String = "",
+        genre: String? = null,
+        dateStr: String? = null,
+        isLiveOnly: Boolean = false,
+        channelName: String? = null
+    ): List<EpgSearchResultItem> {
         val normalizedQuery = normalizeForSearch(query)
         val keywords = normalizedQuery.split(Regex("[\\s]+")).filter { it.isNotBlank() }
 
-        // キーワードが空なら何も返さない
-        if (keywords.isEmpty()) return emptyList()
+        // 全ての条件が空の場合は、処理をスキップして空リストを返す（負荷対策）
+        if (keywords.isEmpty() && genre.isNullOrBlank() && dateStr.isNullOrBlank() && channelName.isNullOrBlank() && !isLiveOnly) {
+            return emptyList()
+        }
 
         val results = mutableListOf<EpgSearchResultItem>()
-        val now = System.currentTimeMillis()
         val nowMs = System.currentTimeMillis()
 
+        // 日付のパース
+        val targetTvDate = try {
+            dateStr?.takeIf { it.isNotBlank() }?.let {
+                java.time.LocalDate.parse(it.replace("/", "-"))
+            }
+        } catch (e: Exception) {
+            null
+        }
+
         memoryCache.values.flatten().forEach { wrapper ->
+            // 1. チャンネルフィルター (部分一致)
+            if (!channelName.isNullOrBlank() && !wrapper.channel.name.contains(
+                    channelName,
+                    ignoreCase = true
+                )
+            ) {
+                return@forEach // チャンネル名が一致しなければスキップ
+            }
+
             wrapper.programs.forEach { prog ->
                 try {
                     val startTimeMs =
                         OffsetDateTime.parse(prog.start_time).toInstant().toEpochMilli()
                     if (startTimeMs > nowMs) {
-                        val detailText =
-                            prog.detail?.entries?.joinToString(" ") { "${it.key} ${it.value}" }
-                                ?: ""
-                        val combinedDesc = "${prog.title} ${prog.description} $detailText"
 
-                        // ★修正: 検索対象のテキストも同様に正規化する
-                        val normalizedDesc = normalizeForSearch(combinedDesc)
-
-                        // ★修正: AND検索（分割したすべてのキーワードが説明文に含まれているか判定）
-                        val isMatch = keywords.all { keyword ->
-                            normalizedDesc.contains(keyword)
+                        // 2. 日付フィルター (テレビ的1日: 朝4時区切り)
+                        if (targetTvDate != null) {
+                            val startDt = OffsetDateTime.parse(prog.start_time)
+                            val base = startDt.withHour(4).withMinute(0).withSecond(0).withNano(0)
+                            val tvDate = if (startDt.hour < 4) base.minusDays(1)
+                                .toLocalDate() else base.toLocalDate()
+                            if (tvDate != targetTvDate) return@forEach
                         }
 
-                        if (isMatch) {
-                            results.add(EpgSearchResultItem(prog, wrapper.channel))
+                        // 3. ジャンルフィルター
+                        if (!genre.isNullOrBlank()) {
+                            val matchGenre = (prog.genres?.any {
+                                it.major.contains(genre) || it.middle.contains(genre)
+                            } == true) || prog.title.contains(genre)
+                            if (!matchGenre) return@forEach
                         }
+
+                        // 4. 生放送フィルター
+                        if (isLiveOnly) {
+                            val detailText =
+                                prog.detail?.entries?.joinToString(" ") { "${it.key} ${it.value}" }
+                                    ?: ""
+                            val title = prog.title ?: ""
+                            val desc = prog.description ?: ""
+                            val matchLive =
+                                title.contains("[生]") || title.contains("【生】") || title.contains("生中継") || title.contains(
+                                    "生放送"
+                                ) || title.contains("LIVE", ignoreCase = true) ||
+                                        desc.contains("生中継") || desc.contains("生放送") || detailText.contains(
+                                    "生中継"
+                                ) || detailText.contains("生放送")
+                            if (!matchLive) return@forEach
+                        }
+
+                        // 5. キーワードフィルター (AND検索)
+                        if (keywords.isNotEmpty()) {
+                            val detailText =
+                                prog.detail?.entries?.joinToString(" ") { "${it.key} ${it.value}" }
+                                    ?: ""
+                            // ★ チャンネル名も検索対象に含めることで柔軟性アップ
+                            val combinedDesc =
+                                "${wrapper.channel.name} ${prog.title} ${prog.description} $detailText"
+                            val normalizedDesc = normalizeForSearch(combinedDesc)
+                            val isMatch = keywords.all { k -> normalizedDesc.contains(k) }
+                            if (!isMatch) return@forEach
+                        }
+
+                        results.add(EpgSearchResultItem(prog, wrapper.channel))
                     }
                 } catch (e: Exception) { /* ignore */
                 }
             }
         }
 
+        // 時間順にソートして返す
         return results.sortedBy {
             try {
                 OffsetDateTime.parse(it.program.start_time).toInstant().toEpochMilli()

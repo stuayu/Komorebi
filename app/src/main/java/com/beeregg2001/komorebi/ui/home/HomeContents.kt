@@ -3,6 +3,7 @@
 package com.beeregg2001.komorebi.ui.home
 
 import android.os.Build
+import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -24,6 +25,7 @@ import com.beeregg2001.komorebi.data.model.*
 import com.beeregg2001.komorebi.common.safeRequestFocus
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import com.beeregg2001.komorebi.ui.home.components.*
+import com.beeregg2001.komorebi.viewmodel.HomeViewModel
 import kotlinx.coroutines.delay
 
 private const val TAG = "HomeContents"
@@ -52,12 +54,16 @@ fun HomeContents(
     modifier: Modifier = Modifier,
     lastFocusedChannelId: String? = null,
     lastFocusedProgramId: String? = null,
-    isTopNavFocused: Boolean = false
+    isTopNavFocused: Boolean = false,
+    // 🌟 チケットシステムとViewModelを追加
+    ticketManager: HomeFocusTicketManager,
+    homeViewModel: HomeViewModel
 ) {
     val lazyListState = rememberTvLazyListState()
     val isFirstItemRendered =
         remember { derivedStateOf { lazyListState.layoutInfo.visibleItemsInfo.isNotEmpty() } }
 
+    // --- 既存の Effect 群 ---
     LaunchedEffect(isFirstItemRendered.value) {
         if (isFirstItemRendered.value) {
             delay(100); onUiReady()
@@ -120,6 +126,34 @@ fun HomeContents(
             }
         }
 
+    // 🌟 チケットシステム: 第1段階（縦スクロール）処理
+    val availableSections =
+        remember(lastWatchedChannels, hotChannels, genrePickup, watchHistory, upcomingReserves) {
+            val list = mutableListOf<String>()
+            if (lastWatchedChannels.isNotEmpty()) list.add("lastWatched")
+            if (hotChannels.isNotEmpty()) list.add("hot")
+            if (genrePickup.isNotEmpty()) list.add("pickup")
+            if (watchHistory.isNotEmpty()) list.add("history")
+            if (upcomingReserves.isNotEmpty()) list.add("upcoming")
+            list
+        }
+
+    LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
+        if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE) {
+            val targetSection = ticketManager.targetSection
+            if (targetSection != null) {
+                val index = availableSections.indexOf(targetSection)
+                if (index != -1) {
+                    Log.i(
+                        "KomorebiFocus",
+                        "[$TAG] 第1段階: 対象セクション($targetSection) インデックス $index へ縦スクロール"
+                    )
+                    lazyListState.scrollToItem(index)
+                }
+            }
+        }
+    }
+
     val upToTabModifier = Modifier.onKeyEvent {
         if (it.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN && it.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP) {
             tabFocusRequester.safeRequestFocus(TAG); true
@@ -151,9 +185,11 @@ fun HomeContents(
             HomeHeroDashboard(info = currentHeroInfo)
         }
 
-        Box(modifier = Modifier
-            .weight(0.55f)
-            .fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .weight(0.55f)
+                .fillMaxWidth()
+        ) {
             TvLazyColumn(
                 state = lazyListState,
                 modifier = Modifier
@@ -173,7 +209,11 @@ fun HomeContents(
                             mirakurunPort = mirakurunPort,
                             modifier = if (topSection == "lastWatched") upToTabModifier else Modifier,
                             onChannelClick = onChannelClick,
-                            onUpdateHeroInfo = { pendingHeroInfo = it }
+                            onUpdateHeroInfo = { pendingHeroInfo = it },
+                            // 🌟 追加
+                            ticketManager = ticketManager,
+                            homeViewModel = homeViewModel,
+                            sectionId = "lastWatched"
                         )
                     }
                 }
@@ -185,7 +225,11 @@ fun HomeContents(
                             konomiPort = konomiPort,
                             modifier = if (topSection == "hot") upToTabModifier else Modifier,
                             onChannelClick = onChannelClick,
-                            onUpdateHeroInfo = { pendingHeroInfo = it }
+                            onUpdateHeroInfo = { pendingHeroInfo = it },
+                            // 🌟 追加
+                            ticketManager = ticketManager,
+                            homeViewModel = homeViewModel,
+                            sectionId = "hot"
                         )
                     }
                 }
@@ -200,7 +244,11 @@ fun HomeContents(
                             modifier = if (topSection == "pickup") upToTabModifier else Modifier,
                             onProgramClick = onProgramClick,
                             onNavigateToTab = onNavigateToTab,
-                            onUpdateHeroInfo = { pendingHeroInfo = it }
+                            onUpdateHeroInfo = { pendingHeroInfo = it },
+                            // 🌟 追加
+                            ticketManager = ticketManager,
+                            homeViewModel = homeViewModel,
+                            sectionId = "pickup"
                         )
                     }
                 }
@@ -212,7 +260,11 @@ fun HomeContents(
                             konomiPort = konomiPort,
                             modifier = if (topSection == "history") upToTabModifier else Modifier,
                             onHistoryClick = onHistoryClick,
-                            onUpdateHeroInfo = { pendingHeroInfo = it }
+                            onUpdateHeroInfo = { pendingHeroInfo = it },
+                            // 🌟 追加
+                            ticketManager = ticketManager,
+                            homeViewModel = homeViewModel,
+                            sectionId = "history"
                         )
                     }
                 }
@@ -225,7 +277,11 @@ fun HomeContents(
                             modifier = if (topSection == "upcoming") upToTabModifier else Modifier,
                             onReserveClick = onReserveClick,
                             onNavigateToTab = onNavigateToTab,
-                            onUpdateHeroInfo = { pendingHeroInfo = it }
+                            onUpdateHeroInfo = { pendingHeroInfo = it },
+                            // 🌟 追加
+                            ticketManager = ticketManager,
+                            homeViewModel = homeViewModel,
+                            sectionId = "upcoming"
                         )
                     }
                 }
