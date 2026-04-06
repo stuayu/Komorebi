@@ -550,7 +550,8 @@ fun HomeLauncherScreen(
                                 groupedChannels = groupedChannels,
                                 isReserveOverlayOpen = isReserveOverlayOpen,
                                 isReturningFromPlayer = isReturningFromPlayer && safeTabIndex == 4,
-                                onReturnFocusConsumed = onReturnFocusConsumed
+                                onReturnFocusConsumed = onReturnFocusConsumed,
+                                timeFormat = timeFormat
                             )
                             LaunchedEffect(Unit) {
                                 delay(500); onUiReady(); ui.isCurrentTabContentReady = true
