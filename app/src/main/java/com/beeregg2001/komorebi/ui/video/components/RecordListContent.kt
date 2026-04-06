@@ -72,8 +72,8 @@ fun RecordListContent(
     onFirstItemBound: (Boolean) -> Unit = {},
     onFocusedItemChanged: (RecordedProgram?) -> Unit = {},
     onOpenNavPane: () -> Unit = {},
-    // TopBar の下キー時に使うべき FocusRequester を親へ通知。先頭可視アイテムが変わるたびに呼ばれる。
-    onTopBarDownRequesterChanged: (FocusRequester) -> Unit = {}
+    onTopBarDownRequesterChanged: (FocusRequester) -> Unit = {},
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
     val scope = rememberCoroutineScope()
@@ -93,10 +93,6 @@ fun RecordListContent(
         remember { MutableTransitionState(false) }.apply { targetState = isAnyMenuOpen }
     val isScrollInProgress = listState.isScrollInProgress
 
-    // 先頭可視アイテムが変わるたびに、TopBar の下キー用 requester を親に通知する。
-    // listState.firstVisibleItemIndex が変わると再実行され、対応する specificRequester を返す。
-    // itemFocusRequesters はアイテムが描画されるたびに埋まるため、
-    // 先頭アイテムが画面に入った直後は null になる可能性があるが、その場合は firstItemFocusRequester にフォールバック。
     val firstVisibleItemIndex by remember { derivedStateOf { listState.firstVisibleItemIndex } }
     LaunchedEffect(firstVisibleItemIndex, pagedRecordings.itemCount) {
         val firstVisibleId = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? Int
@@ -204,7 +200,8 @@ fun RecordListContent(
                                     }
                                 }
                                 false
-                            }
+                            },
+                        timeFormat = timeFormat // ★ 追加: RecordListItem に渡す
                     )
                 }
             }
@@ -296,7 +293,8 @@ fun RecordListContent(
                                 ); onClearDetail()
                                     scope.launch { delay(50); detailButtonFocusRequester.safeRequestFocus() }
                                 },
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize(),
+                                timeFormat = timeFormat // ★ 追加: RecordDetailPanel に渡す
                             )
                         } else {
                             Column(

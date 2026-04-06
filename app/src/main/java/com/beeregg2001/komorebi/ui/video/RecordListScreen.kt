@@ -74,7 +74,8 @@ fun RecordListScreen(
     // ★追加: プレイヤーからの復帰を検知して元の位置に戻るためのプロパティ
     isReturningFromPlayer: Boolean = false,
     lastPlayedProgramId: Int? = null,
-    onReturnFocusConsumed: () -> Unit = {}
+    onReturnFocusConsumed: () -> Unit = {},
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
     val scope = rememberCoroutineScope()
@@ -555,7 +556,10 @@ fun RecordListScreen(
                                     onClearDetail = { viewModel.clearProgramDetail() },
                                     onFocusedItemChanged = { focusedProgram = it },
                                     onOpenNavPane = handleOpenNavPane,
-                                    onTopBarDownRequesterChanged = { listContentDownRequester = it }
+                                    onTopBarDownRequesterChanged = {
+                                        listContentDownRequester = it
+                                    },
+                                    timeFormat = timeFormat // ★ 追加
                                 )
                             }
                         }
@@ -599,6 +603,8 @@ fun RecordListScreen(
                                     onOpenNavPane = handleOpenNavPane,
                                     ticketManager = ticketManager,
                                     onFocusedItemChanged = { focusedProgram = it }
+                                    // ※ 今回は RecordGridContent には timeFormat を渡していませんが、
+                                    // もしグリッド表示内の番組カードでも時刻表示がある場合は同様に渡す必要があります。
                                 )
                             }
                         }
@@ -625,9 +631,11 @@ fun RecordListScreen(
                 }
             }
 
-            Box(modifier = Modifier
-                .zIndex(5f)
-                .fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .zIndex(5f)
+                    .fillMaxSize()
+            ) {
                 RecordListOverlay(
                     menuState = menuState,
                     focuses = focuses,

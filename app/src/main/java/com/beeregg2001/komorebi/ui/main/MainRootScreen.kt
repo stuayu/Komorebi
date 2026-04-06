@@ -92,6 +92,8 @@ fun MainRootScreen(
         }
     }
 
+    val timeFormat by settingsViewModel.timeFormat.collectAsState()
+
     val stopRecordingAndSend = {
         if (isRecordingVoice) {
             val file = audioRecorderHelper.stopRecording()
@@ -594,7 +596,8 @@ fun MainRootScreen(
                                 },
                                 isReturningFromPlayer = state.isReturningFromPlayer,
                                 lastPlayedProgramId = state.lastPlayedRecordingId,
-                                onReturnFocusConsumed = { state.isReturningFromPlayer = false }
+                                onReturnFocusConsumed = { state.isReturningFromPlayer = false },
+                                timeFormat = timeFormat
                             )
                         }
 
