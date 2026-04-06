@@ -85,10 +85,10 @@ class ChannelViewModel @Inject constructor(
         }
             .flowOn(Dispatchers.Default) // ★最適化: Map内の重い文字列判定をバックグラウンドスレッドで実行
             .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyMap()
-        )
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyMap()
+            )
 
     private val _recentRecordings = MutableStateFlow<List<RecordedProgram>>(emptyList())
     val recentRecordings: StateFlow<List<RecordedProgram>> = _recentRecordings
@@ -103,6 +103,9 @@ class ChannelViewModel @Inject constructor(
     private var progressUpdateJob: Job? = null
 
     private var fetchJob: Job? = null
+
+    // ★ 追加: 最後にAPIからデータを取得した時刻を記録し、タブ移動時の「鮮度」を判定する
+    private var lastFetchedTimeMillis = 0L
 
     init {
         startPolling()
@@ -191,6 +194,9 @@ class ChannelViewModel @Inject constructor(
             }
             _groupedChannels.value = processed
             _liveRows.value = transformToUiState(processed)
+
+            // ★ 追加: 取得に成功したら、現在時刻を記録
+            lastFetchedTimeMillis = System.currentTimeMillis()
         } catch (e: CancellationException) {
             Log.d("ChannelViewModel", "fetchChannelsInternal cancelled")
             throw e
@@ -242,9 +248,25 @@ class ChannelViewModel @Inject constructor(
     fun startPolling() {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
-            while (isActive) {
+            // ★ 追加・修正: 【鮮度チェック】
+            // startPollingが呼ばれた（タブに戻ってきた）瞬間、前回取得から60秒以上経過していれば即座にAPIを叩く
+            if (System.currentTimeMillis() - lastFetchedTimeMillis > 60_000L) {
+                Log.i("ChannelViewModel", "Data is stale. Fetching immediately.")
                 fetchChannelsInternal()
-                delay(60_000L) // 1分待機
+            }
+
+            while (isActive) {
+                // ★ 追加・修正: 【分またぎ同期 (Minute-Boundary Sync)】
+                // 闇雲に60秒待つのではなく、現在時刻から「次の00秒」までの残り時間を計算して待機する
+                val now = System.currentTimeMillis()
+                val delayToNextMinute = 60_000L - (now % 60_000L)
+
+                // サーバー側の番組切り替え処理ラグを考慮し、00秒ジャストではなく「00秒の1.5秒後」にAPIを叩く
+                delay(delayToNextMinute + 1500L)
+
+                if (isActive) {
+                    fetchChannelsInternal()
+                }
             }
         }
     }

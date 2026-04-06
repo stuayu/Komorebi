@@ -156,11 +156,19 @@ fun HomeLauncherScreen(
         }
     }
 
+    // ==========================================================
+    // ★ 修正箇所: タブ切り替え時のポーリング制御
+    // ==========================================================
     LaunchedEffect(ui.selectedTabIndex) {
         if (ui.selectedTabIndex == 0) {
+            // ホームタブ
             channelViewModel.startPolling()
             homeViewModel.refreshHomeData()
+        } else if (ui.selectedTabIndex == 1) {
+            // ライブタブ: ポーリングを止めずに開始・維持する！
+            channelViewModel.startPolling()
         } else {
+            // その他のタブ: 負荷軽減のためポーリングを停止する
             channelViewModel.stopPolling()
         }
     }
@@ -507,9 +515,6 @@ fun HomeLauncherScreen(
                         }
 
                         "番組表" -> {
-                            // ★ 修正: EpgNavigationContainer にも timeFormat を渡せるようにする場合は適宜追加します
-                            // (今回の ModernEpgCanvasEngine の修正で、すでに内部でSettingsViewModelを参照する仕組みなら不要ですが、
-                            // もし必要であれば追加してください。現状は EpgDrawer への渡し込みで解決しています)
                             EpgNavigationContainer(
                                 uiState = ui.epgUiState,
                                 logoUrls = ui.logoUrls,
