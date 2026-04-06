@@ -498,7 +498,8 @@ fun HomeLauncherScreen(
                                 isTopNavFocused = ui.topNavHasFocus,
                                 isReturningFromPlayer = isReturningFromPlayer && safeTabIndex == 2,
                                 lastPlayedProgramId = lastPlayerProgramId,
-                                onReturnFocusConsumed = onReturnFocusConsumed
+                                onReturnFocusConsumed = onReturnFocusConsumed,
+                                timeFormat = timeFormat
                             )
                             LaunchedEffect(Unit) {
                                 delay(500); onUiReady(); ui.isCurrentTabContentReady = true

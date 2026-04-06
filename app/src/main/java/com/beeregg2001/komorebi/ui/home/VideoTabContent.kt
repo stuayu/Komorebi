@@ -62,6 +62,7 @@ import com.beeregg2001.komorebi.viewmodel.SeriesInfo
 import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private const val TAG = "VideoTabContent"
 
@@ -82,7 +83,8 @@ fun VideoTabContent(
     isTopNavFocused: Boolean = false,
     isReturningFromPlayer: Boolean = false,
     lastPlayedProgramId: String? = null,
-    onReturnFocusConsumed: () -> Unit = {}
+    onReturnFocusConsumed: () -> Unit = {},
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
 
@@ -222,7 +224,6 @@ fun VideoTabContent(
                         modifier = Modifier
                             .focusRequester(contentFirstItemRequester)
                             .then(upToTabModifier)
-                            // 🌟 追加: 横方向のフォーカス抜けを防止
                             .focusProperties {
                                 left = FocusRequester.Cancel
                                 right = FocusRequester.Cancel
@@ -275,12 +276,22 @@ fun VideoTabContent(
                                         onFocus = {
                                             focusedProgramId = program.id
                                             recordViewModel.fetchProgramDetail(program.id)
+
+                                            // ★ 修正: Hero用に timeFormat に応じた日付+時刻のフォーマットを生成
                                             val startFormat = try {
+                                                val pattern =
+                                                    if (timeFormat == "12H") "yyyy/M/d(E) a h:mm" else "yyyy/M/d(E) HH:mm"
                                                 OffsetDateTime.parse(program.startTime)
-                                                    .format(DateTimeFormatter.ofPattern("yyyy/M/d(E) HH:mm"))
+                                                    .format(
+                                                        DateTimeFormatter.ofPattern(
+                                                            pattern,
+                                                            Locale.JAPANESE
+                                                        )
+                                                    )
                                             } catch (e: Exception) {
                                                 program.startTime
                                             }
+
                                             val duration =
                                                 if (program.duration > 0) program.duration else program.recordedVideo.duration
                                             val progress =
@@ -302,12 +313,12 @@ fun VideoTabContent(
                                             )
                                         },
                                         isCurrentlyRecording = isCurrentlyRecording,
-                                        // 🌟 追加: 端のガード
                                         modifier = Modifier.focusProperties {
                                             if (index == 0) left = FocusRequester.Cancel
                                             if (index == itemsToTake.lastIndex) right =
                                                 FocusRequester.Cancel
-                                        }
+                                        },
+                                        timeFormat = timeFormat // ★ 追加
                                     )
                                 }
                             }
@@ -372,7 +383,6 @@ fun VideoTabContent(
                                                     .coerceIn(0f, 1f) else null
                                             )
                                         },
-                                        // 🌟 追加: 端のガード
                                         modifier = Modifier.focusProperties {
                                             if (index == 0) left = FocusRequester.Cancel
                                             if (index == itemsToTake.lastIndex) right =
@@ -407,7 +417,6 @@ fun VideoTabContent(
                                         onClick = { recordViewModel.updateSeriesGenre(genre) },
                                         modifier = Modifier
                                             .height(40.dp)
-                                            // 🌟 追加: 端のガード
                                             .focusProperties {
                                                 if (index == 0) left = FocusRequester.Cancel
                                                 if (index == genreList.lastIndex) right =
@@ -481,7 +490,6 @@ fun VideoTabContent(
                                                 tag = "シリーズ"
                                             )
                                         },
-                                        // 🌟 追加: 端のガード
                                         modifier = Modifier.focusProperties {
                                             if (index == 0) left = FocusRequester.Cancel
                                             if (index == filteredSeries.lastIndex) right =
@@ -510,7 +518,8 @@ private fun VideoRecentRecordCard(
     modifier: Modifier = Modifier,
     isCurrentlyRecording: Boolean = false,
     ticketManager: FocusTicketManager,
-    onReturnFocusConsumed: () -> Unit
+    onReturnFocusConsumed: () -> Unit,
+    timeFormat: String // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
     var isFocused by remember { mutableStateOf(false) }
@@ -581,9 +590,11 @@ private fun VideoRecentRecordCard(
                     .align(Alignment.BottomStart)
                     .padding(16.dp)
             ) {
+                // ★ 修正: timeFormat に応じたカード上の日付+時刻のフォーマット
                 val startFormat = try {
+                    val pattern = if (timeFormat == "12H") "M/d(E) a h:mm" else "M/d(E) HH:mm"
                     OffsetDateTime.parse(program.startTime)
-                        .format(DateTimeFormatter.ofPattern("M/d(E) HH:mm"))
+                        .format(DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE))
                 } catch (e: Exception) {
                     program.startTime
                 }
@@ -777,7 +788,7 @@ private fun VideoSeriesCard(
     konomiPort: String,
     onClick: () -> Unit,
     onFocus: () -> Unit,
-    modifier: Modifier = Modifier // 🌟 追加: Modifierを受け取るように修正
+    modifier: Modifier = Modifier
 ) {
     val colors = KomorebiTheme.colors
     var isFocused by remember { mutableStateOf(false) }
