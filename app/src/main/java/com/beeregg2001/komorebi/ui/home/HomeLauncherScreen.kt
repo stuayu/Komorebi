@@ -106,7 +106,8 @@ fun HomeLauncherScreen(
     onCloseRecordList: () -> Unit = {},
     onShowSeriesList: () -> Unit = {},
     isReturningFromPlayer: Boolean = false,
-    onReturnFocusConsumed: () -> Unit = {}
+    onReturnFocusConsumed: () -> Unit = {},
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val ui = rememberHomeLauncherState(
         initialTabIndex,
@@ -124,8 +125,6 @@ fun HomeLauncherScreen(
     val favoriteBaseballTeams by homeViewModel.favoriteBaseballTeams.collectAsState()
     val favoriteBaseballGames by homeViewModel.favoriteBaseballGames.collectAsState()
     val baseballDateOffset by homeViewModel.baseballDateOffset.collectAsState()
-
-    val timeFormat by settingsViewModel.timeFormat.collectAsState()
 
     val baseTabs = listOf("ホーム", "ライブ", "ビデオ", "番組表", "録画予約")
     val tabs = remember(favoriteBaseballTeams) {
@@ -574,7 +573,8 @@ fun HomeLauncherScreen(
                                 contentFirstItemRequester = ui.contentFirstItemRequesters[5],
                                 onUiReady = {
                                     delay(500); onUiReady(); ui.isCurrentTabContentReady = true
-                                }
+                                },
+                                timeFormat = timeFormat
                             )
                         }
                     }

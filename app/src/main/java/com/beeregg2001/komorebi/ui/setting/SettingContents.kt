@@ -484,7 +484,7 @@ fun DisplaySettingsContent(
 
             // ★ 追加: 時刻の表示形式
             SettingItem(
-                "時刻の表示形式 (ホーム・番組表)",
+                "時刻の表示形式",
                 if (preferences.timeFormat == "12H") "12時間表記 (AM/PM)" else "24時間表記",
                 Icons.Default.Schedule,
                 modifier = Modifier

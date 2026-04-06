@@ -47,7 +47,8 @@ fun BaseballDashboardScreen(
     onProgramClick: (EpgProgram) -> Unit,
     topNavFocusRequester: FocusRequester,
     contentFirstItemRequester: FocusRequester,
-    onUiReady: suspend () -> Unit
+    onUiReady: suspend () -> Unit,
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
 
@@ -212,7 +213,8 @@ fun BaseballDashboardScreen(
                                             if (gameIndex == 0) left = FocusRequester.Cancel
                                             if (gameIndex == teamGames.lastIndex) right =
                                                 FocusRequester.Cancel
-                                        }
+                                        },
+                                    timeFormat = timeFormat // ★ 追加: 12H/24H フォーマットを渡す
                                 )
                             }
                         }
@@ -228,7 +230,8 @@ fun BaseballDashboardScreen(
 fun BaseballGameCard(
     game: BaseballGameInfo,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
     var isFocused by remember { mutableStateOf(false) }
@@ -246,8 +249,12 @@ fun BaseballGameCard(
     }
     val statusColor = if (isLive) Color(0xFFFF5252) else colors.textSecondary
 
-    val formatter = DateTimeFormatter.ofPattern("HH:mm")
-    val timeStr = "${start.format(formatter)} - ${end.format(formatter)}"
+    // ★ 修正: timeFormat に応じた時刻表示
+    val timeStr = remember(start, end, timeFormat) {
+        val pattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+        val formatter = DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE)
+        "${start.format(formatter)} - ${end.format(formatter)}"
+    }
 
     Surface(
         onClick = onClick,

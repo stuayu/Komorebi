@@ -92,6 +92,7 @@ fun MainRootScreen(
         }
     }
 
+    // ★ 取得: SettingsViewModelから時間フォーマット(12H/24H)を取得
     val timeFormat by settingsViewModel.timeFormat.collectAsState()
 
     val stopRecordingAndSend = {
@@ -468,10 +469,8 @@ fun MainRootScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                // ★ 修正: onPreviewKeyEvent で AIパネルが開いている時のキー操作をブロックする
                 .onPreviewKeyEvent { event ->
                     if (state.isAiConciergeOpen || state.showAiKeyboardInput) {
-                        // AIパネルが開いている時は、裏画面のキーイベントをすべて無視（飲み込む）
                         return@onPreviewKeyEvent false
                     }
 
@@ -511,7 +510,6 @@ fun MainRootScreen(
                 isSystemReady && isSettingsInitialized && !state.showConnectionErrorDialog && !isSyncingInitial
 
             if (showMainContent) {
-                // ★ 修正: focusProperties による全体ブロックを解除し、自然なフォーカス移動を復活
                 Box(modifier = Modifier.fillMaxSize()) {
                     when {
                         state.selectedChannel != null -> {
@@ -597,7 +595,7 @@ fun MainRootScreen(
                                 isReturningFromPlayer = state.isReturningFromPlayer,
                                 lastPlayedProgramId = state.lastPlayedRecordingId,
                                 onReturnFocusConsumed = { state.isReturningFromPlayer = false },
-                                timeFormat = timeFormat
+                                timeFormat = timeFormat // ★ timeFormatを渡す
                             )
                         }
 
@@ -659,7 +657,8 @@ fun MainRootScreen(
                                     )
                                 },
                                 onDismiss = { state.editingCondition = null },
-                                onReserveItemClick = { state.selectedConditionReserveItem = it }
+                                onReserveItemClick = { state.selectedConditionReserveItem = it },
+                                timeFormat = timeFormat // ★ timeFormatを渡す
                             )
                         }
 
@@ -746,7 +745,8 @@ fun MainRootScreen(
                                 isReturningFromPlayer = state.isReturningFromPlayer,
                                 onReturnFocusConsumed = { state.isReturningFromPlayer = false },
                                 isUiReadyFlag = state.isUiReady,
-                                settingsViewModel = settingsViewModel
+                                settingsViewModel = settingsViewModel,
+                                timeFormat = timeFormat
                             )
                         }
                     }
@@ -802,7 +802,8 @@ fun MainRootScreen(
                     isReserved = true,
                     isReadOnly = true,
                     onBackClick = { state.selectedConditionReserveItem = null },
-                    initialFocusRequester = detailFocusRequester
+                    initialFocusRequester = detailFocusRequester,
+                    timeFormat = timeFormat // ★ timeFormatを渡す
                 )
             }
 
@@ -818,7 +819,8 @@ fun MainRootScreen(
                             state.editingReserveItem = latest ?: state.selectedReserve
                         }
                     },
-                    initialFocusRequester = detailFocusRequester
+                    initialFocusRequester = detailFocusRequester,
+                    timeFormat = timeFormat // ★ timeFormatを渡す
                 )
             }
 
@@ -917,7 +919,8 @@ fun MainRootScreen(
                         if (relatedReserve != null) state.reserveToDelete = relatedReserve
                     },
                     onBackClick = { state.epgSelectedProgram = null },
-                    initialFocusRequester = detailFocusRequester
+                    initialFocusRequester = detailFocusRequester,
+                    timeFormat = timeFormat // ★ timeFormatを渡す
                 )
             }
 

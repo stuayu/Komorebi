@@ -40,6 +40,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 enum class ProgramDetailMode {
     EPG, RESERVE
@@ -65,7 +66,8 @@ fun ProgramDetailScreen(
     onEditReserveClick: (EpgProgram) -> Unit = {},
     onDeleteReserveClick: (EpgProgram) -> Unit = {},
     onBackClick: () -> Unit,
-    initialFocusRequester: FocusRequester
+    initialFocusRequester: FocusRequester,
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     // 軽量化された番組データ(ID欠落)の場合、channel_id から自動的に補完する
     val safeProgram = remember(program) {
@@ -430,15 +432,15 @@ fun ProgramDetailScreen(
                     .focusable()
                     .verticalScroll(scrollState)
             ) {
-                val formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd(E) HH:mm")
+                // ★ 修正: timeFormat に応じた日付・時刻のフォーマット
+                val startPattern =
+                    if (timeFormat == "12H") "yyyy/MM/dd(E) a h:mm" else "yyyy/MM/dd(E) HH:mm"
+                val endPattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+                val formatter = DateTimeFormatter.ofPattern(startPattern, Locale.JAPANESE)
+                val endFormatter = DateTimeFormatter.ofPattern(endPattern, Locale.JAPANESE)
+
                 Text(
-                    text = "${startTime.format(formatter)} ～ ${
-                        endTime.format(
-                            DateTimeFormatter.ofPattern(
-                                "HH:mm"
-                            )
-                        )
-                    }",
+                    text = "${startTime.format(formatter)} ～ ${endTime.format(endFormatter)}",
                     style = MaterialTheme.typography.labelLarge,
                     color = colors.textSecondary,
                     fontFamily = NotoSansJP
@@ -481,6 +483,7 @@ fun ProgramDetailScreen(
                 initialKeyword = TitleNormalizer.extractDisplayTitle(safeProgram.title),
                 initialStartTime = startTime,
                 initialEndTime = endTime,
+                timeFormat = timeFormat,
                 onConfirm = { keyword, daysOfWeek, sH, sM, eH, eM, exc, tOnly, bType, fuzzy, dup, pri, relay, exact ->
                     showEpgReserveDialog = false
                     onEpgReserveClick(
