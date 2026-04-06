@@ -39,7 +39,8 @@ fun EpgSearchListItem(
     resultItem: UiSearchResultItem,
     reserveItem: ReserveItem?,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    timeFormat: String // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val program = resultItem.program
     val channel = resultItem.channel
@@ -65,12 +66,18 @@ fun EpgSearchListItem(
     val secondaryTextColor =
         if (isFocused) inverseColor.copy(alpha = 0.8f) else colors.textSecondary
 
-    val displayDate = remember(program.start_time, program.end_time) {
+    // ★ 修正: timeFormat の値によって DateTimeFormatter のパターンを動的に変更する
+    val displayDate = remember(program.start_time, program.end_time, timeFormat) {
         try {
             val startZdt = OffsetDateTime.parse(program.start_time)
             val endZdt = OffsetDateTime.parse(program.end_time)
-            val formatter = DateTimeFormatter.ofPattern("M/d(E) HH:mm", Locale.JAPANESE)
-            val endFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+            // 12Hなら "午後 1:00", 24Hなら "13:00"
+            val startPattern = if (timeFormat == "12H") "M/d(E) a h:mm" else "M/d(E) HH:mm"
+            val endPattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+
+            val formatter = DateTimeFormatter.ofPattern(startPattern, Locale.JAPANESE)
+            val endFormatter = DateTimeFormatter.ofPattern(endPattern, Locale.JAPANESE)
             "${startZdt.format(formatter)} - ${endZdt.format(endFormatter)}"
         } catch (e: Exception) {
             ""
@@ -108,18 +115,16 @@ fun EpgSearchListItem(
         )
     ) {
         Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            // 左側: ロゴエリア
             Box(
                 modifier = Modifier
                     .width(100.dp)
                     .fillMaxHeight()
-                    .background(Color.White), // 白背景
+                    .background(Color.White),
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
                     model = imageRequest,
                     contentDescription = null,
-                    // ★修正: 枠いっぱいに広げてCrop(上下を切り落とす)することで16:9にする
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )

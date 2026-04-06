@@ -100,11 +100,31 @@ fun LiveContent(
         }
     }
 
+    // ==========================================================
+    // ★ 修正箇所: バックグラウンドのデータ更新にUIを追従させる
+    // ==========================================================
     LaunchedEffect(liveRows) {
-        if (focusedChannel == null && liveRows.isNotEmpty()) {
-            val firstChannel = liveRows.firstOrNull()?.channels?.firstOrNull()
-            if (firstChannel != null) {
-                pendingChannel = firstChannel
+        if (liveRows.isNotEmpty()) {
+            val currentId = pendingChannel?.channel?.id ?: focusedChannel?.channel?.id
+
+            if (currentId == null) {
+                // 初回読み込み時: 最初のチャンネルをセット
+                val firstChannel = liveRows.firstOrNull()?.channels?.firstOrNull()
+                if (firstChannel != null) {
+                    pendingChannel = firstChannel
+                }
+            } else {
+                // ポーリングや分またぎ同期でデータが更新された際、
+                // 現在フォーカスしているチャンネルと同じIDの「最新データ」を探して上書きする
+                val updatedChannel = liveRows
+                    .flatMap { it.channels }
+                    .find { it.channel.id == currentId }
+
+                if (updatedChannel != null) {
+                    // データが更新されていれば、フォーカスの移動を待たずに即時反映させる
+                    pendingChannel = updatedChannel
+                    focusedChannel = updatedChannel
+                }
             }
         }
     }
