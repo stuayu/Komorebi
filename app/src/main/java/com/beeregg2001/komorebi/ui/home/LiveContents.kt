@@ -73,7 +73,8 @@ fun LiveContent(
     topNavFocusRequester: FocusRequester, contentFirstItemRequester: FocusRequester,
     onPlayerStateChanged: (Boolean) -> Unit, lastFocusedChannelId: String? = null,
     isReturningFromPlayer: Boolean = false, onReturnFocusConsumed: () -> Unit = {},
-    reserveViewModel: ReserveViewModel
+    reserveViewModel: ReserveViewModel,
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val liveRows by channelViewModel.liveRows.collectAsState()
     val listState = rememberLazyListState()
@@ -100,28 +101,21 @@ fun LiveContent(
         }
     }
 
-    // ==========================================================
-    // ★ 修正箇所: バックグラウンドのデータ更新にUIを追従させる
-    // ==========================================================
     LaunchedEffect(liveRows) {
         if (liveRows.isNotEmpty()) {
             val currentId = pendingChannel?.channel?.id ?: focusedChannel?.channel?.id
 
             if (currentId == null) {
-                // 初回読み込み時: 最初のチャンネルをセット
                 val firstChannel = liveRows.firstOrNull()?.channels?.firstOrNull()
                 if (firstChannel != null) {
                     pendingChannel = firstChannel
                 }
             } else {
-                // ポーリングや分またぎ同期でデータが更新された際、
-                // 現在フォーカスしているチャンネルと同じIDの「最新データ」を探して上書きする
                 val updatedChannel = liveRows
                     .flatMap { it.channels }
                     .find { it.channel.id == currentId }
 
                 if (updatedChannel != null) {
-                    // データが更新されていれば、フォーカスの移動を待たずに即時反映させる
                     pendingChannel = updatedChannel
                     focusedChannel = updatedChannel
                 }
@@ -202,7 +196,8 @@ fun LiveContent(
                         HeroDashboard(
                             uiState = focusedChannel!!,
                             konomiIp = konomiIp,
-                            konomiPort = konomiPort
+                            konomiPort = konomiPort,
+                            timeFormat = timeFormat // ★ 追加: HeroDashboardにフォーマットを渡す
                         )
                     }
                 }
@@ -258,7 +253,6 @@ fun LiveContent(
                                                 if (row.genreId == liveRows.firstOrNull()?.genreId) {
                                                     up = topNavFocusRequester
                                                 }
-                                                // 🌟 追加: 端でのフォーカス抜け落ち（設定ボタン等への誤爆）防止
                                                 if (index == 0) left = FocusRequester.Cancel
                                                 if (isLastItem) right = FocusRequester.Cancel
                                             }
@@ -309,7 +303,8 @@ fun LiveContent(
 fun HeroDashboard(
     uiState: UiChannelState,
     konomiIp: String,
-    konomiPort: String
+    konomiPort: String,
+    timeFormat: String = "24H" // ★ 追加
 ) {
     val colors = KomorebiTheme.colors
     val present = uiState.channel.programPresent
@@ -317,10 +312,13 @@ fun HeroDashboard(
     val isHot = (uiState.jikkyoForce ?: 0) > 500
     val logoUrl = UrlBuilder.getKonomiTvLogoUrl(konomiIp, konomiPort, uiState.displayChannelId)
 
+    // ★ 修正: timeFormat に応じて時刻の表示パターンを動的に切り替える
     val formatTime = { timeStr: String? ->
         if (timeStr.isNullOrEmpty()) ""
         else try {
-            OffsetDateTime.parse(timeStr).format(DateTimeFormatter.ofPattern("HH:mm"))
+            val pattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+            OffsetDateTime.parse(timeStr)
+                .format(DateTimeFormatter.ofPattern(pattern, java.util.Locale.JAPANESE))
         } catch (e: Exception) {
             ""
         }
