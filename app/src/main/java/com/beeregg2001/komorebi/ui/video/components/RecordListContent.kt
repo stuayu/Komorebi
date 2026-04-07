@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalComposeUiApi::class)
+
 package com.beeregg2001.komorebi.ui.video.components
 
 import android.os.Build
@@ -24,7 +26,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -73,7 +74,10 @@ fun RecordListContent(
     onFocusedItemChanged: (RecordedProgram?) -> Unit = {},
     onOpenNavPane: () -> Unit = {},
     onTopBarDownRequesterChanged: (FocusRequester) -> Unit = {},
-    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
+    timeFormat: String = "24H",
+    // ★ 追加: 自動予約用のキーワードリストと、予約ボタン押下時のコールバック
+    autoReserveKeywords: List<String> = emptyList(),
+    onAutoReserveClick: (RecordedProgram) -> Unit = {}
 ) {
     val colors = KomorebiTheme.colors
     val scope = rememberCoroutineScope()
@@ -201,7 +205,7 @@ fun RecordListContent(
                                 }
                                 false
                             },
-                        timeFormat = timeFormat // ★ 追加: RecordListItem に渡す
+                        timeFormat = timeFormat
                     )
                 }
             }
@@ -209,7 +213,7 @@ fun RecordListContent(
 
         val overlayWidth by animateDpAsState(
             targetValue = when {
-                isDetailVisible -> 350.dp; isSideMenuOpen -> 210.dp; else -> 0.dp
+                isDetailVisible -> 350.dp; isSideMenuOpen -> 230.dp; else -> 0.dp
             },
             animationSpec = tween(250), label = "OverlayWidth"
         )
@@ -294,7 +298,7 @@ fun RecordListContent(
                                     scope.launch { delay(50); detailButtonFocusRequester.safeRequestFocus() }
                                 },
                                 modifier = Modifier.fillMaxSize(),
-                                timeFormat = timeFormat // ★ 追加: RecordDetailPanel に渡す
+                                timeFormat = timeFormat
                             )
                         } else {
                             Column(
@@ -303,6 +307,14 @@ fun RecordListContent(
                                     .padding(horizontal = 12.dp),
                                 verticalArrangement = Arrangement.Center
                             ) {
+                                // ★ 自動予約済みかの判定ロジック
+                                val displayTitle = focusedProgram?.title?.let {
+                                    TitleNormalizer.extractDisplayTitle(it)
+                                } ?: ""
+                                val isAlreadyAutoReserved = autoReserveKeywords.any { kw ->
+                                    kw.isNotBlank() && displayTitle.contains(kw, ignoreCase = true)
+                                }
+
                                 SideMenuItem(
                                     icon = Icons.Default.PlayArrow,
                                     label = "再生する",
@@ -333,9 +345,7 @@ fun RecordListContent(
                                         .focusProperties { right = FocusRequester.Cancel },
                                     onClick = {
                                         detailProgram = focusedProgram; focusedProgram?.id?.let {
-                                        onFetchDetail(
-                                            it
-                                        )
+                                        onFetchDetail(it)
                                     }; detailPanelFocusRequester.safeRequestFocus(); onDetailStateChange(
                                         true
                                     )
@@ -350,12 +360,28 @@ fun RecordListContent(
                                     },
                                     onClick = {
                                         focusedProgram?.let {
-                                            val displayTitle =
-                                                TitleNormalizer.extractDisplayTitle(it.title)
                                             val keyword =
                                                 TitleNormalizer.toSqlSearchQuery(displayTitle)
                                             onSeriesSearch(keyword)
                                             isSideMenuOpen = false
+                                        }
+                                    })
+                                Spacer(Modifier.height(12.dp))
+                                // ★ 新規追加: 自動予約ボタン
+                                SideMenuItem(
+                                    icon = if (isAlreadyAutoReserved) Icons.Default.Check else Icons.Default.Schedule,
+                                    label = if (isAlreadyAutoReserved) "自動予約済み" else "この番組を自動予約",
+                                    isExpanded = true,
+                                    modifier = Modifier.focusProperties {
+                                        right = FocusRequester.Cancel
+                                    },
+                                    enabled = !isAlreadyAutoReserved,
+                                    onClick = {
+                                        focusedProgram?.let {
+                                            if (!isAlreadyAutoReserved && displayTitle.isNotBlank()) {
+                                                isSideMenuOpen = false
+                                                onAutoReserveClick(it)
+                                            }
                                         }
                                     })
                                 Spacer(Modifier.height(12.dp))
@@ -397,7 +423,7 @@ private fun SideMenuItem(
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color.Transparent,
             focusedContainerColor = colors.textPrimary,
-            contentColor = colors.textPrimary,
+            contentColor = colors.accent, // ★ 非アクティブ（予約済み）のときも少し目立たせるため
             focusedContentColor = if (colors.isDark) Color.Black else Color.White
         ),
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(4.dp))
@@ -408,14 +434,22 @@ private fun SideMenuItem(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(imageVector = icon, contentDescription = label, modifier = Modifier.size(24.dp))
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(24.dp),
+                // ★ 予約済みの場合は色を変える
+                tint = if (enabled) LocalContentColor.current else colors.accent
+            )
             if (isExpanded) {
                 Spacer(Modifier.width(12.dp))
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
                     fontSize = 13.sp,
-                    maxLines = 1
+                    maxLines = 1,
+                    // ★ 予約済みの場合は色を変える
+                    color = if (enabled) LocalContentColor.current else colors.accent
                 )
             }
         }

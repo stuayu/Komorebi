@@ -43,17 +43,20 @@ import com.beeregg2001.komorebi.ui.video.RecordListScreen
 import com.beeregg2001.komorebi.ui.video.player.VideoPlayerScreen
 import com.beeregg2001.komorebi.ui.reserve.ReserveSettingsDialog
 import com.beeregg2001.komorebi.ui.reserve.ConditionEditDialog
+import com.beeregg2001.komorebi.ui.reserve.EpgReserveDialog
 import com.beeregg2001.komorebi.util.AudioRecorderHelper
 import com.beeregg2001.komorebi.viewmodel.*
 import com.beeregg2001.komorebi.ui.theme.AppTheme
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import com.beeregg2001.komorebi.ui.theme.getSeasonalBackgroundBrush
+import com.beeregg2001.komorebi.util.TitleNormalizer
 import com.beeregg2001.komorebi.util.UpdateState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.LocalTime
+import java.time.OffsetDateTime
 
 private const val TAG = "MainRootScreen"
 
@@ -92,7 +95,6 @@ fun MainRootScreen(
         }
     }
 
-    // ★ 取得: SettingsViewModelから時間フォーマット(12H/24H)を取得
     val timeFormat by settingsViewModel.timeFormat.collectAsState()
 
     val stopRecordingAndSend = {
@@ -196,6 +198,25 @@ fun MainRootScreen(
                     }
                 }
 
+                is AiConciergeAction.SearchRecord -> {
+                    state.isAiConciergeOpen = false
+                    aiConciergeViewModel.resetState()
+
+                    state.currentTabIndex = 2 // ビデオタブ
+                    state.isRecordListOpen = true
+
+                    if (action.keyword.isNotBlank()) {
+                        val firstKeyword = action.keyword.split(",").firstOrNull()?.trim() ?: ""
+                        recordViewModel.searchRecordings(firstKeyword)
+                    }
+                    if (action.genre.isNotBlank()) {
+                        recordViewModel.updateGenre(action.genre)
+                    }
+
+                    state.toastMessage =
+                        if (action.keyword.isNotBlank()) "「${action.keyword.split(",").firstOrNull()}」の録画を検索します" else "録画リストを表示します"
+                }
+
                 is AiConciergeAction.ReqEpgSearch -> {
                     scope.launch {
                         val results = epgViewModel.searchSilently(
@@ -206,6 +227,26 @@ fun MainRootScreen(
                             action.channelName
                         )
                         aiConciergeViewModel.submitSilentSearchResult(action.keyword, results)
+                    }
+                }
+
+                is AiConciergeAction.ReqRecSearch -> {
+                    scope.launch {
+                        val allRecs = recordViewModel.recentRecordings.value
+
+                        val keywords = action.keyword.split(",").map { it.trim() }.filter { it.isNotBlank() }
+
+                        val results = allRecs.filter { program ->
+                            val matchKeyword = keywords.isEmpty() || keywords.any { kw ->
+                                program.title.contains(kw, ignoreCase = true) ||
+                                        program.description.contains(kw, ignoreCase = true)
+                            }
+                            val matchGenre = action.genre.isBlank() ||
+                                    program.genres?.any { g -> g.major.contains(action.genre) } == true
+
+                            matchKeyword && matchGenre
+                        }
+                        aiConciergeViewModel.submitSilentRecordSearchResult(action.keyword, results)
                     }
                 }
 
@@ -220,6 +261,12 @@ fun MainRootScreen(
                 is AiConciergeAction.ReserveAuto -> {
                     state.isAiConciergeOpen = false
                     aiConciergeViewModel.resetState()
+
+                    Log.i(TAG, "=== 自動予約登録（AIコンシェルジュから） ===")
+                    Log.i(TAG, "キーワード: ${action.keyword}")
+                    Log.i(TAG, "送信パラメーター -> NID: 0, TSID: 0, SID: 0 (全チャンネル対象)")
+                    Log.i(TAG, "=========================================")
+
                     reserveViewModel.addEpgReserve(
                         keyword = action.keyword,
                         networkId = 0,
@@ -284,6 +331,10 @@ fun MainRootScreen(
 
     val conditions by reserveViewModel.conditions.collectAsState()
     val reserves by reserveViewModel.reserves.collectAsState()
+
+    val autoReserveKeywords = remember(conditions) {
+        conditions.map { it.programSearchCondition.keyword }.filter { it.isNotBlank() }
+    }
 
     val isSyncingInitial by remember(recordViewModel) {
         recordViewModel.syncProgress.map { it.isSyncing && it.isInitialBuild }
@@ -391,6 +442,7 @@ fun MainRootScreen(
             state.editingNewProgram != null -> state.editingNewProgram = null
             state.editingReserveItem != null -> state.editingReserveItem = null
             state.reserveToDelete != null -> state.reserveToDelete = null
+            state.selectedProgramForAutoReserve != null -> state.selectedProgramForAutoReserve = null
             state.showDeleteConfirmDialog -> state.showDeleteConfirmDialog = false
 
             state.isPlayerMiniListOpen -> state.isPlayerMiniListOpen = false
@@ -470,10 +522,6 @@ fun MainRootScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .onPreviewKeyEvent { event ->
-                    if (state.isAiConciergeOpen || state.showAiKeyboardInput) {
-                        return@onPreviewKeyEvent false
-                    }
-
                     val isCenterKey =
                         event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter
 
@@ -482,6 +530,10 @@ fun MainRootScreen(
                             isLongPressHandled = false
                             return@onPreviewKeyEvent true
                         }
+                    }
+
+                    if (state.isAiConciergeOpen || state.showAiKeyboardInput) {
+                        return@onPreviewKeyEvent false
                     }
 
                     if (isCenterKey && event.type == KeyEventType.KeyDown) {
@@ -595,7 +647,9 @@ fun MainRootScreen(
                                 isReturningFromPlayer = state.isReturningFromPlayer,
                                 lastPlayedProgramId = state.lastPlayedRecordingId,
                                 onReturnFocusConsumed = { state.isReturningFromPlayer = false },
-                                timeFormat = timeFormat // ★ timeFormatを渡す
+                                timeFormat = timeFormat,
+                                autoReserveKeywords = autoReserveKeywords,
+                                onAutoReserveClick = { program -> state.selectedProgramForAutoReserve = program }
                             )
                         }
 
@@ -658,7 +712,7 @@ fun MainRootScreen(
                                 },
                                 onDismiss = { state.editingCondition = null },
                                 onReserveItemClick = { state.selectedConditionReserveItem = it },
-                                timeFormat = timeFormat // ★ timeFormatを渡す
+                                timeFormat = timeFormat
                             )
                         }
 
@@ -793,6 +847,97 @@ fun MainRootScreen(
                 }
             }
 
+            // ★ 録画リストからの「自動予約ダイアログ」表示
+            if (state.selectedProgramForAutoReserve != null) {
+                val program = state.selectedProgramForAutoReserve!!
+                val initialKeyword = TitleNormalizer.extractDisplayTitle(program.title)
+                val now = OffsetDateTime.now()
+                val start = runCatching { OffsetDateTime.parse(program.startTime) }.getOrDefault(now)
+                val end = runCatching { OffsetDateTime.parse(program.endTime) }.getOrDefault(now.plusHours(1))
+
+                EpgReserveDialog(
+                    initialKeyword = initialKeyword,
+                    initialStartTime = start,
+                    initialEndTime = end,
+                    onConfirm = { keyword, daysOfWeek, startH, startM, endH, endM, exc, tOnly, bType, fuzzy, dup, pri, relay, exact ->
+
+                        val channelId = program.channel?.id
+                        val matchedChannel = groupedChannels.values.flatten().find { it.id == channelId }
+
+                        val nId = matchedChannel?.networkId?.toInt() ?: 0
+                        val sId = matchedChannel?.serviceId?.toInt() ?: 0
+                        var tsId = matchedChannel?.transportStreamId?.toInt() ?: 0
+
+                        // ★修正: KonomiTVのチャンネル情報からTSIDが0だった場合、確実な NID と SID の組み合わせで EPGキャッシュからサルベージする
+                        if (tsId == 0 && nId != 0 && sId != 0) {
+                            val currentEpgState = epgViewModel.uiState
+                            if (currentEpgState is EpgUiState.Success) {
+                                val epgChannel = currentEpgState.data.find {
+                                    it.channel.id == channelId || (it.channel.network_id == nId && it.channel.service_id == sId)
+                                }?.channel
+                                if (epgChannel != null) {
+                                    tsId = epgChannel.transport_stream_id
+                                }
+                            }
+                        }
+
+                        // それでも0なら、検索結果から同様に探す
+                        if (tsId == 0 && nId != 0 && sId != 0) {
+                            val searchResults = epgViewModel.searchResults.value
+                            val matchedSearch = searchResults.find {
+                                it.channel.id == channelId || (it.channel.network_id == nId && it.channel.service_id == sId)
+                            }
+                            if (matchedSearch != null) {
+                                tsId = matchedSearch.channel.transport_stream_id
+                            }
+                        }
+
+                        // 地デジフォールバック
+                        if (tsId == 0 && nId in 32736..32742) {
+                            tsId = nId
+                        }
+
+                        Log.i(TAG, "=== 自動予約登録（録画リストから） ===")
+                        Log.i(TAG, "抽出キーワード: $keyword")
+                        Log.i(TAG, "元の録画番組のチャンネルID: $channelId")
+                        Log.i(TAG, "マッチしたチャンネル名: ${matchedChannel?.name ?: "なし"}")
+                        Log.i(TAG, "送信パラメーター -> NID: $nId, TSID: $tsId, SID: $sId")
+                        Log.i(TAG, "===================================")
+
+                        reserveViewModel.addEpgReserve(
+                            keyword = keyword,
+                            networkId = nId,
+                            transportStreamId = tsId,
+                            serviceId = sId,
+                            daysOfWeek = daysOfWeek,
+                            startHour = startH,
+                            startMinute = startM,
+                            endHour = endH,
+                            endMinute = endM,
+                            excludeKeyword = exc,
+                            isTitleOnly = tOnly,
+                            broadcastType = bType,
+                            isFuzzySearch = fuzzy,
+                            duplicateScope = dup,
+                            priority = pri,
+                            isEventRelay = relay,
+                            isExactRecord = exact,
+                            onSuccess = {
+                                scope.launch {
+                                    state.selectedProgramForAutoReserve = null
+                                    delay(300)
+                                    state.toastMessage = "「${keyword}」の自動録画条件を登録しました"
+                                }
+                            }
+                        )
+                    },
+                    onDismiss = {
+                        state.selectedProgramForAutoReserve = null
+                    },
+                    timeFormat = timeFormat
+                )
+            }
+
             if (state.selectedConditionReserveItem != null) {
                 val program =
                     remember(state.selectedConditionReserveItem) { ReserveMapper.toEpgProgram(state.selectedConditionReserveItem!!) }
@@ -803,7 +948,7 @@ fun MainRootScreen(
                     isReadOnly = true,
                     onBackClick = { state.selectedConditionReserveItem = null },
                     initialFocusRequester = detailFocusRequester,
-                    timeFormat = timeFormat // ★ timeFormatを渡す
+                    timeFormat = timeFormat
                 )
             }
 
@@ -820,7 +965,7 @@ fun MainRootScreen(
                         }
                     },
                     initialFocusRequester = detailFocusRequester,
-                    timeFormat = timeFormat // ★ timeFormatを渡す
+                    timeFormat = timeFormat
                 )
             }
 
@@ -858,11 +1003,14 @@ fun MainRootScreen(
 
                         var finalTsId = channel?.transportStreamId?.toInt() ?: 0
 
+                        // ★ 修正: EPGからの予約時にも、IDだけでなくNIDとSIDの組み合わせで確実に見つける
                         if (finalTsId == 0) {
                             val currentEpgState = epgViewModel.uiState
                             if (currentEpgState is EpgUiState.Success) {
-                                val epgChannel =
-                                    currentEpgState.data.find { it.channel.id == program.channel_id }?.channel
+                                val epgChannel = currentEpgState.data.find {
+                                    it.channel.id == program.channel_id ||
+                                            (it.channel.network_id == program.network_id && it.channel.service_id == program.service_id)
+                                }?.channel
                                 if (epgChannel != null) {
                                     finalTsId = epgChannel.transport_stream_id
                                 }
@@ -871,8 +1019,11 @@ fun MainRootScreen(
 
                         if (finalTsId == 0) {
                             val searchResults = epgViewModel.searchResults.value
-                            val matchedResult =
-                                searchResults.find { it.program.id == program.id || it.channel.id == program.channel_id }
+                            val matchedResult = searchResults.find {
+                                it.program.id == program.id ||
+                                        it.channel.id == program.channel_id ||
+                                        (it.channel.network_id == program.network_id && it.channel.service_id == program.service_id)
+                            }
                             if (matchedResult != null) {
                                 finalTsId = matchedResult.channel.transport_stream_id
                             }
@@ -881,6 +1032,13 @@ fun MainRootScreen(
                         if (finalTsId == 0 && program.network_id in 32736..32742) {
                             finalTsId = program.network_id
                         }
+
+                        Log.i(TAG, "=== 自動予約登録（EPGから） ===")
+                        Log.i(TAG, "抽出キーワード: $keyword")
+                        Log.i(TAG, "元の番組のチャンネルID: ${program.channel_id}")
+                        Log.i(TAG, "マッチしたチャンネル名: ${channel?.name ?: "なし"}")
+                        Log.i(TAG, "送信パラメーター -> NID: ${program.network_id}, TSID: $finalTsId, SID: ${program.service_id}")
+                        Log.i(TAG, "===============================")
 
                         reserveViewModel.addEpgReserve(
                             keyword = keyword,
@@ -920,7 +1078,7 @@ fun MainRootScreen(
                     },
                     onBackClick = { state.epgSelectedProgram = null },
                     initialFocusRequester = detailFocusRequester,
-                    timeFormat = timeFormat // ★ timeFormatを渡す
+                    timeFormat = timeFormat
                 )
             }
 
