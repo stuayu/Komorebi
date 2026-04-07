@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTvMaterial3Api::class)
+
 package com.beeregg2001.komorebi.ui.live
 
 import androidx.compose.animation.animateColorAsState
@@ -32,7 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.*
 import com.beeregg2001.komorebi.ui.components.ChannelLogo
 import com.beeregg2001.komorebi.data.model.Channel
-import com.beeregg2001.komorebi.ui.theme.KomorebiTheme // ★追加
+import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -64,10 +66,11 @@ fun ChannelListOverlay(
     val currentChannels = groupedChannels[selectedTab] ?: emptyList()
     val listState = rememberLazyListState()
 
-    // タブに対応する FocusRequester リスト
+    // ★ 修正: availableTabKeys が確定したタイミングで、すべてのタブの FocusRequester を一括生成して安定させる
     val tabFocusRequesters = remember(availableTabKeys) {
-        List(availableTabKeys.size) { FocusRequester() }
+        availableTabKeys.associateWith { FocusRequester() }
     }
+
     val selectedTabIndex = availableTabKeys.indexOf(selectedTab).coerceAtLeast(0)
 
     // タブ切り替え時にリストを先頭（または選択中チャンネル）に戻す
@@ -87,7 +90,6 @@ fun ChannelListOverlay(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        // ★修正: 黒の固定値からテーマ背景色ベースのグラデーションへ
                         colors.background.copy(alpha = 0.6f),
                         colors.background.copy(alpha = 0.9f),
                         colors.background
@@ -98,7 +100,7 @@ fun ChannelListOverlay(
             )
             .padding(bottom = 8.dp, top = 16.dp)
     ) {
-        // --- 1. 放送波種別タブ (下線タイプ & フォーカス維持修正) ---
+        // --- 1. 放送波種別タブ ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center
@@ -128,13 +130,20 @@ fun ChannelListOverlay(
                     val interactionSource = remember { MutableInteractionSource() }
                     val isFocused by interactionSource.collectIsFocusedAsState()
 
+                    // 紐づけた FocusRequester を取得
+                    val requester = tabFocusRequesters[tabKey] ?: FocusRequester()
+
                     Tab(
                         selected = isSelected,
                         onFocus = { selectedTab = tabKey },
-                        modifier = Modifier.focusRequester(tabFocusRequesters[index]),
+                        modifier = Modifier
+                            .focusRequester(requester)
+                            .focusProperties {
+                                // 下キーを押したときは自然にリストへ移動させる
+                                down = FocusRequester.Default
+                            },
                         interactionSource = interactionSource
                     ) {
-                        // ★修正: Unresolved reference を回避するため Text 側で色を指定
                         Text(
                             text = label,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -149,7 +158,7 @@ fun ChannelListOverlay(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // --- 2. チャンネルリスト (上に移動した際に現在選択中のタブへ戻る設定) ---
+        // --- 2. チャンネルリスト ---
         LazyRow(
             state = listState,
             contentPadding = PaddingValues(horizontal = 48.dp),
@@ -157,14 +166,10 @@ fun ChannelListOverlay(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(130.dp)
-                // ★修正: リストから上に移動したとき、常に地デジではなく「現在選択中のタブ」へ移動させる
-                .focusProperties {
-                    up = tabFocusRequesters[selectedTabIndex]
-                }
+                // 戻るキーで選択中のタブにフォーカスを戻す処理
                 .onKeyEvent { event ->
                     if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
-                        // 戻るキーでも選択中のタブにフォーカスを戻す
-                        tabFocusRequesters[selectedTabIndex].requestFocus()
+                        tabFocusRequesters[selectedTab]?.requestFocus()
                         return@onKeyEvent true
                     }
                     false
@@ -172,9 +177,8 @@ fun ChannelListOverlay(
         ) {
             items(currentChannels, key = { it.id }) { channel ->
                 val isSelected = channel.id == currentChannelId
-
-                // 初期フォーカスを現在のチャンネルに合わせるためのRequester
-                val itemRequester = if (isSelected) focusRequester else FocusRequester()
+                val itemRequester =
+                    if (isSelected) focusRequester else remember { FocusRequester() }
 
                 ChannelCardItem(
                     channel = channel,
@@ -184,7 +188,15 @@ fun ChannelListOverlay(
                     konomiIp = konomiIp,
                     konomiPort = konomiPort,
                     onClick = { onChannelSelect(channel) },
-                    modifier = Modifier.focusRequester(itemRequester)
+                    modifier = Modifier
+                        .focusRequester(itemRequester)
+                        // ★ 修正: 個別のカードに対して、上キーを押したときの強制移動先（現在選択中のタブ）を指定する
+                        .focusProperties {
+                            val currentTabRequester = tabFocusRequesters[selectedTab]
+                            if (currentTabRequester != null) {
+                                up = currentTabRequester
+                            }
+                        }
                 )
             }
         }
@@ -212,7 +224,6 @@ fun ChannelCardItem(
         label = "scale"
     )
 
-    // ★修正: カード背景色のテーマ化
     val backgroundColor by animateColorAsState(
         targetValue = if (isFocused) colors.textPrimary
         else if (isSelected) colors.surface
@@ -220,7 +231,6 @@ fun ChannelCardItem(
         animationSpec = tween(200), label = "bgColor"
     )
 
-    // ★修正: 文字色のテーマ化
     val contentColor by animateColorAsState(
         targetValue = if (isFocused) (if (colors.isDark) Color.Black else Color.White) else colors.textPrimary,
         label = "contentColor"

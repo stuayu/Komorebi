@@ -3,7 +3,6 @@
 package com.beeregg2001.komorebi.ui.video.player
 
 import android.content.Context
-import android.graphics.Color
 import android.os.Build
 import android.util.Base64
 import android.util.Log
@@ -23,6 +22,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.focus.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -73,11 +73,13 @@ fun VideoPlayerScreen(
     onSceneSearchToggle: (Boolean) -> Unit,
     onBackPressed: () -> Unit,
     onShowToast: (String) -> Unit,
+    // ★ 追加: PiP状態の受け取りと、要求コールバック
+    isPiPMode: Boolean = false,
+    onPiPRequested: () -> Unit = {},
     recordViewModel: RecordViewModel = hiltViewModel(),
     settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val colors = KomorebiTheme.colors
     val scope = rememberCoroutineScope()
 
     var currentProgram by remember { mutableStateOf(program) }
@@ -191,9 +193,6 @@ fun VideoPlayerScreen(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // ★修正: setAllowChunklessPreparation(true) を削除
-        // これにより、MPEG-TSのメタデータ不足によるデコーダーのサイレントフリーズを防ぎ、
-        // 最初のチャンクを確実に読み込んでから安定して再生を開始させます。
         val hlsMediaSourceFactory = HlsMediaSource.Factory(httpDataSourceFactory)
 
         ExoPlayer.Builder(context, renderersFactory)
@@ -306,6 +305,9 @@ fun VideoPlayerScreen(
     }
 
     LaunchedEffect(isSubMenuOpen, isSceneSearchOpen, isChapterListOpen, showControls) {
+        // ★ PiPモード中はフォーカスを奪わないようにする
+        if (isPiPMode) return@LaunchedEffect
+
         delay(150)
         if (isSubMenuOpen) {
             subMenuFocusRequester.safeRequestFocus(TAG)
@@ -317,20 +319,51 @@ fun VideoPlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
+            .background(Color.Black)
             .onKeyEvent { keyEvent ->
+                // ★ PiPモード中はキーイベントを全てスルー（裏側のホーム画面に処理させる）
+                if (isPiPMode) return@onKeyEvent false
+
                 if (isSubMenuOpen || isSceneSearchOpen || isChapterListOpen) return@onKeyEvent false
 
                 val keyCode = keyEvent.nativeKeyEvent.keyCode
                 val repeatCount = keyEvent.nativeKeyEvent.repeatCount
+                val isActionDown = keyEvent.type == KeyEventType.KeyDown
+                val isActionUp = keyEvent.type == KeyEventType.KeyUp
 
-                if (keyEvent.type == KeyEventType.KeyDown) {
+                if (isActionDown) {
                     vs.lastInteractionTime = System.currentTimeMillis()
                 }
 
                 when (keyCode) {
+                    // ★ 戻るキー長押しの実装
+                    NativeKeyEvent.KEYCODE_BACK, NativeKeyEvent.KEYCODE_ESCAPE -> {
+                        if (isActionDown) {
+                            if (repeatCount == 0) {
+                                vs.backKeyDownTime = System.currentTimeMillis()
+                                vs.isBackKeyLongPressed = false
+                            } else {
+                                val elapsed = System.currentTimeMillis() - vs.backKeyDownTime
+                                if (!vs.isBackKeyLongPressed && elapsed > 500) {
+                                    vs.isBackKeyLongPressed = true
+                                    onPiPRequested()
+                                }
+                            }
+                            return@onKeyEvent true
+                        } else if (isActionUp) {
+                            val elapsed = System.currentTimeMillis() - vs.backKeyDownTime
+                            if (!vs.isBackKeyLongPressed && elapsed < 500) {
+                                onBackPressed()
+                            }
+                            vs.backKeyDownTime = 0L
+                            vs.isBackKeyLongPressed = false
+                            return@onKeyEvent true
+                        }
+                        false
+                    }
+
                     NativeKeyEvent.KEYCODE_DPAD_CENTER, NativeKeyEvent.KEYCODE_ENTER -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
+                        if (isActionDown) {
                             onShowControlsChange(true)
                             vs.togglePlayPause(exoPlayer.isPlaying)
                             if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
@@ -339,7 +372,7 @@ fun VideoPlayerScreen(
                     }
 
                     NativeKeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
+                        if (isActionDown) {
                             if (repeatCount == 0) {
                                 rightKeyDownTime = System.currentTimeMillis()
                                 isRightKeyLongPressed = false
@@ -368,7 +401,7 @@ fun VideoPlayerScreen(
                                     }
                                 }
                             }
-                        } else if (keyEvent.type == KeyEventType.KeyUp) {
+                        } else if (isActionUp) {
                             val elapsed = System.currentTimeMillis() - rightKeyDownTime
                             if (!isRightKeyLongPressed && elapsed < 500) {
                                 onShowControlsChange(true)
@@ -382,7 +415,7 @@ fun VideoPlayerScreen(
                     }
 
                     NativeKeyEvent.KEYCODE_DPAD_LEFT -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
+                        if (isActionDown) {
                             if (repeatCount == 0) {
                                 leftKeyDownTime = System.currentTimeMillis()
                                 isLeftKeyLongPressed = false
@@ -414,7 +447,7 @@ fun VideoPlayerScreen(
                                     }
                                 }
                             }
-                        } else if (keyEvent.type == KeyEventType.KeyUp) {
+                        } else if (isActionUp) {
                             val elapsed = System.currentTimeMillis() - leftKeyDownTime
                             if (!isLeftKeyLongPressed && elapsed < 500) {
                                 onShowControlsChange(true)
@@ -428,7 +461,7 @@ fun VideoPlayerScreen(
                     }
 
                     NativeKeyEvent.KEYCODE_DPAD_DOWN -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
+                        if (isActionDown) {
                             if (repeatCount == 0) {
                                 downKeyDownTime = System.currentTimeMillis()
                                 isDownKeyLongPressed = false
@@ -447,7 +480,7 @@ fun VideoPlayerScreen(
                                     }
                                 }
                             }
-                        } else if (keyEvent.type == KeyEventType.KeyUp) {
+                        } else if (isActionUp) {
                             val elapsed = System.currentTimeMillis() - downKeyDownTime
                             if (!isDownKeyLongPressed && elapsed < 500) {
                                 onShowControlsChange(true)
@@ -460,7 +493,7 @@ fun VideoPlayerScreen(
                     }
 
                     NativeKeyEvent.KEYCODE_DPAD_UP -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
+                        if (isActionDown) {
                             onShowControlsChange(true)
                             onSubMenuToggle(true)
                         }
@@ -509,141 +542,149 @@ fun VideoPlayerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .focusRequester(mainFocusRequester)
-                .focusable()
+                // ★ PiPモード中はフォーカスを受け取らないようにする
+                // ★ VideoPlayerScreenにはisMiniListOpenが存在しないため削除
+                .focusable(!isPiPMode && !isSubMenuOpen)
         )
 
-        val commentLayer = @Composable {
-            if (isHeavyUiReady && vs.isCommentEnabled) {
-                ArchivedCommentOverlay(
-                    Modifier.fillMaxSize(), allComments, { exoPlayer.currentPosition },
-                    vs.isPlayerPlaying, vs.isCommentEnabled, commentSpeed,
-                    commentFontSizeScale, commentOpacity, commentMaxLines, isEmulator
+        // ★ PiPモード時は字幕や実況などのリソースを食うUIはすべて非表示にし、パフォーマンスを確保する
+        if (!isPiPMode) {
+            val commentLayer = @Composable {
+                if (isHeavyUiReady && vs.isCommentEnabled) {
+                    ArchivedCommentOverlay(
+                        Modifier.fillMaxSize(), allComments, { exoPlayer.currentPosition },
+                        vs.isPlayerPlaying, vs.isCommentEnabled, commentSpeed,
+                        commentFontSizeScale, commentOpacity, commentMaxLines, isEmulator
+                    )
+                }
+            }
+
+            val subtitleLayer = @Composable {
+                if (isHeavyUiReady) {
+                    AndroidView(
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(-1, -1)
+                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                settings.apply {
+                                    javaScriptEnabled = true; domStorageEnabled = true
+                                }
+                                loadUrl("file:///android_asset/subtitle_renderer.html")
+                                webViewRef.value = this
+                            }
+                        },
+                        update = {
+                            it.visibility =
+                                if (vs.isSubtitleEnabled) View.VISIBLE else View.INVISIBLE
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
+            if (subtitleCommentLayer == "CommentOnTop") {
+                subtitleLayer(); commentLayer()
+            } else {
+                commentLayer(); subtitleLayer()
+            }
+
+            if (isBuffering) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center),
+                    color = androidx.compose.ui.graphics.Color.White
                 )
             }
-        }
 
-        val subtitleLayer = @Composable {
-            if (isHeavyUiReady) {
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(-1, -1)
-                            setBackgroundColor(Color.TRANSPARENT)
-                            settings.apply { javaScriptEnabled = true; domStorageEnabled = true }
-                            loadUrl("file:///android_asset/subtitle_renderer.html")
-                            webViewRef.value = this
-                        }
+            PlayerControls(
+                exoPlayer,
+                currentProgram.title,
+                showControls && !isSubMenuOpen && !isSceneSearchOpen && !isChapterListOpen
+            )
+
+            AnimatedVisibility(
+                isSceneSearchOpen,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                SceneSearchOverlay(
+                    currentProgram,
+                    exoPlayer.currentPosition,
+                    konomiIp,
+                    konomiPort,
+                    {
+                        exoPlayer.seekTo(it); onSceneSearchToggle(false); scope.launch {
+                        delay(200); mainFocusRequester.safeRequestFocus(TAG)
+                    }
                     },
-                    update = {
-                        it.visibility = if (vs.isSubtitleEnabled) View.VISIBLE else View.INVISIBLE
+                    {
+                        onSceneSearchToggle(false); scope.launch {
+                        delay(200); mainFocusRequester.safeRequestFocus(TAG)
+                    }
+                    })
+            }
+
+            AnimatedVisibility(
+                isChapterListOpen,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                ChapterListOverlay(
+                    currentProgram,
+                    exoPlayer.currentPosition,
+                    konomiIp,
+                    konomiPort,
+                    {
+                        exoPlayer.seekTo(it)
+                        isChapterListOpen = false
+                        scope.launch { delay(200); mainFocusRequester.safeRequestFocus(TAG) }
                     },
-                    modifier = Modifier.fillMaxSize()
+                    {
+                        isChapterListOpen = false
+                        scope.launch { delay(200); mainFocusRequester.safeRequestFocus(TAG) }
+                    }
                 )
             }
-        }
 
-        if (subtitleCommentLayer == "CommentOnTop") {
-            subtitleLayer(); commentLayer()
-        } else {
-            commentLayer(); subtitleLayer()
-        }
-
-        if (isBuffering) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center),
-                color = androidx.compose.ui.graphics.Color.White
-            )
-        }
-
-        PlayerControls(
-            exoPlayer,
-            currentProgram.title,
-            showControls && !isSubMenuOpen && !isSceneSearchOpen && !isChapterListOpen
-        )
-
-        AnimatedVisibility(
-            isSceneSearchOpen,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-        ) {
-            SceneSearchOverlay(
-                currentProgram,
-                exoPlayer.currentPosition,
-                konomiIp,
-                konomiPort,
-                {
-                    exoPlayer.seekTo(it); onSceneSearchToggle(false); scope.launch {
-                    delay(200); mainFocusRequester.safeRequestFocus(TAG)
-                }
-                },
-                {
-                    onSceneSearchToggle(false); scope.launch {
-                    delay(200); mainFocusRequester.safeRequestFocus(TAG)
-                }
-                })
-        }
-
-        AnimatedVisibility(
-            isChapterListOpen,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-        ) {
-            ChapterListOverlay(
-                currentProgram,
-                exoPlayer.currentPosition,
-                konomiIp,
-                konomiPort,
-                {
-                    exoPlayer.seekTo(it)
-                    isChapterListOpen = false
-                    scope.launch { delay(200); mainFocusRequester.safeRequestFocus(TAG) }
-                },
-                {
-                    isChapterListOpen = false
-                    scope.launch { delay(200); mainFocusRequester.safeRequestFocus(TAG) }
-                }
-            )
-        }
-
-        AnimatedVisibility(
-            isSubMenuOpen,
-            enter = slideInVertically { -it } + fadeIn(),
-            exit = slideOutVertically { -it } + fadeOut()) {
-            VideoTopSubMenuUI(
-                vs.currentAudioMode, vs.currentSpeed, vs.isSubtitleEnabled,
-                vs.currentQuality, vs.isCommentEnabled, subMenuFocusRequester,
-                {
-                    vs.currentAudioMode =
-                        if (vs.currentAudioMode == AudioMode.MAIN) AudioMode.SUB else AudioMode.MAIN;
-                    val tracks =
-                        exoPlayer.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }; if (tracks.size >= 2) exoPlayer.trackSelectionParameters =
-                    exoPlayer.trackSelectionParameters.buildUpon()
-                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO).addOverride(
-                            TrackSelectionOverride(
-                                tracks[if (vs.currentAudioMode == AudioMode.SUB) 1 else 0].mediaTrackGroup,
-                                0
+            AnimatedVisibility(
+                isSubMenuOpen,
+                enter = slideInVertically { -it } + fadeIn(),
+                exit = slideOutVertically { -it } + fadeOut()) {
+                VideoTopSubMenuUI(
+                    vs.currentAudioMode, vs.currentSpeed, vs.isSubtitleEnabled,
+                    vs.currentQuality, vs.isCommentEnabled, subMenuFocusRequester,
+                    {
+                        vs.currentAudioMode =
+                            if (vs.currentAudioMode == AudioMode.MAIN) AudioMode.SUB else AudioMode.MAIN;
+                        val tracks =
+                            exoPlayer.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }; if (tracks.size >= 2) exoPlayer.trackSelectionParameters =
+                        exoPlayer.trackSelectionParameters.buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO).addOverride(
+                                TrackSelectionOverride(
+                                    tracks[if (vs.currentAudioMode == AudioMode.SUB) 1 else 0].mediaTrackGroup,
+                                    0
+                                )
                             )
-                        )
-                        .build(); onShowToast("音声: ${if (vs.currentAudioMode == AudioMode.MAIN) "主音声" else "副音声"}")
-                },
-                {
-                    val speeds = listOf(1.0f, 1.5f, 2.0f, 0.8f); vs.currentSpeed =
-                    speeds[(speeds.indexOf(vs.currentSpeed) + 1) % speeds.size]; exoPlayer.setPlaybackSpeed(
-                    vs.currentSpeed
-                ); onShowToast("速度: ${vs.currentSpeed}x")
-                },
-                {
-                    vs.isSubtitleEnabled =
-                        !vs.isSubtitleEnabled; onShowToast("字幕: ${if (vs.isSubtitleEnabled) "表示" else "非表示"}")
-                },
-                { vs.currentQuality = it; onShowToast("画質: ${it.label}") },
-                {
-                    vs.isCommentEnabled =
-                        !vs.isCommentEnabled; onShowToast("実況: ${if (vs.isCommentEnabled) "表示" else "非表示"}")
-                }
-            )
+                            .build(); onShowToast("音声: ${if (vs.currentAudioMode == AudioMode.MAIN) "主音声" else "副音声"}")
+                    },
+                    {
+                        val speeds = listOf(1.0f, 1.5f, 2.0f, 0.8f); vs.currentSpeed =
+                        speeds[(speeds.indexOf(vs.currentSpeed) + 1) % speeds.size]; exoPlayer.setPlaybackSpeed(
+                        vs.currentSpeed
+                    ); onShowToast("速度: ${vs.currentSpeed}x")
+                    },
+                    {
+                        vs.isSubtitleEnabled =
+                            !vs.isSubtitleEnabled; onShowToast("字幕: ${if (vs.isSubtitleEnabled) "表示" else "非表示"}")
+                    },
+                    { vs.currentQuality = it; onShowToast("画質: ${it.label}") },
+                    {
+                        vs.isCommentEnabled =
+                            !vs.isCommentEnabled; onShowToast("実況: ${if (vs.isCommentEnabled) "表示" else "非表示"}")
+                    }
+                )
+            }
+            PlaybackIndicator(vs.indicatorState)
         }
-        PlaybackIndicator(vs.indicatorState)
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current

@@ -74,7 +74,9 @@ fun LiveContent(
     onPlayerStateChanged: (Boolean) -> Unit, lastFocusedChannelId: String? = null,
     isReturningFromPlayer: Boolean = false, onReturnFocusConsumed: () -> Unit = {},
     reserveViewModel: ReserveViewModel,
-    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
+    timeFormat: String = "24H",
+    // ★ 追加: ミニプレイヤー（PiP）モードのフラグを受け取る
+    isPiPMode: Boolean = false
 ) {
     val liveRows by channelViewModel.liveRows.collectAsState()
     val listState = rememberLazyListState()
@@ -179,7 +181,10 @@ fun LiveContent(
             Column(
                 modifier = modifier
                     .fillMaxSize()
-                    .then(if (isPlayerActive) Modifier.focusProperties {
+                    // ★ 修正: プレイヤーが前面に出ているか、PiPモード中はライブタブのUIからフォーカスを奪えないようにする
+                    // （※ ただしPiP時は裏側のUIを操作できるようにしたいため、isPiPModeは除外します。
+                    // 　　つまり、完全なフルスクリーン時(isPlayerActive && !isPiPMode)のみ操作不可にします）
+                    .then(if (isPlayerActive && !isPiPMode) Modifier.focusProperties {
                         up = FocusRequester.Cancel
                         down = FocusRequester.Cancel
                         left = FocusRequester.Cancel
@@ -197,7 +202,7 @@ fun LiveContent(
                             uiState = focusedChannel!!,
                             konomiIp = konomiIp,
                             konomiPort = konomiPort,
-                            timeFormat = timeFormat // ★ 追加: HeroDashboardにフォーマットを渡す
+                            timeFormat = timeFormat
                         )
                     }
                 }
@@ -271,7 +276,10 @@ fun LiveContent(
             }
         }
 
-        if (selectedChannel != null) {
+        // ★ 修正: PiPモード中（すでに別の映像が再生されている）、
+        // もしくは「別の番組をフルスクリーンで視聴中」の場合は、
+        // 裏側でのライブタブのプレビュー再生（LivePlayerScreen）を強制停止し、デコーダーの競合とメモリ不足を防ぐ！
+        if (selectedChannel != null && !isPiPMode) {
             LivePlayerScreen(
                 channel = selectedChannel,
                 mirakurunIp = mirakurunIp,
@@ -304,7 +312,7 @@ fun HeroDashboard(
     uiState: UiChannelState,
     konomiIp: String,
     konomiPort: String,
-    timeFormat: String = "24H" // ★ 追加
+    timeFormat: String = "24H"
 ) {
     val colors = KomorebiTheme.colors
     val present = uiState.channel.programPresent
@@ -312,7 +320,6 @@ fun HeroDashboard(
     val isHot = (uiState.jikkyoForce ?: 0) > 500
     val logoUrl = UrlBuilder.getKonomiTvLogoUrl(konomiIp, konomiPort, uiState.displayChannelId)
 
-    // ★ 修正: timeFormat に応じて時刻の表示パターンを動的に切り替える
     val formatTime = { timeStr: String? ->
         if (timeStr.isNullOrEmpty()) ""
         else try {

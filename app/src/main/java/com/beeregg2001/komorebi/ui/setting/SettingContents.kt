@@ -440,7 +440,7 @@ fun DisplaySettingsContent(
     onEditTab: () -> Unit,
     onEditStartupChannel: () -> Unit,
     onEditDefaultView: () -> Unit,
-    onEditTimeFormat: () -> Unit, // ★ 追加
+    onEditTimeFormat: () -> Unit,
     itemRs: List<FocusRequester>,
     onClick: (FocusRequester) -> Unit
 ) {
@@ -482,7 +482,6 @@ fun DisplaySettingsContent(
                     .focusProperties { left = sidebarR },
                 onClick = { onClick(itemRs[2]); onEditDefaultView() })
 
-            // ★ 追加: 時刻の表示形式
             SettingItem(
                 "時刻の表示形式",
                 if (preferences.timeFormat == "12H") "12時間表記 (AM/PM)" else "24時間表記",
@@ -601,7 +600,7 @@ fun LabSettingsContent(
 
         SettingsSection("プレイヤー (実験的)") {
             SettingItem(
-                title = "Mirakurunソースの2画面同時再生を許可",
+                title = "Mirakurunソースの2画面同時再生・PiPモードを許可",
                 value = mirakurunDual,
                 icon = Icons.Default.VerticalSplit,
                 modifier = Modifier

@@ -9,7 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -107,7 +109,9 @@ fun HomeLauncherScreen(
     onShowSeriesList: () -> Unit = {},
     isReturningFromPlayer: Boolean = false,
     onReturnFocusConsumed: () -> Unit = {},
-    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
+    timeFormat: String = "24H",
+    hasActivePlayer: Boolean = false,
+    onReturnToPlayerClick: () -> Unit = {}
 ) {
     val ui = rememberHomeLauncherState(
         initialTabIndex,
@@ -133,10 +137,13 @@ fun HomeLauncherScreen(
 
     val safeTabIndex = ui.selectedTabIndex.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
 
+    // ★ 修正: PiP（ミニプレイヤー）モード中は「フルスクリーンではない」と判定させ、トップナビを確実に描画する
     val isFullScreenMode = ui.isFullScreen(
         selectedChannel, selectedProgram, epgSelectedProgram,
         isSettingsOpen, isRecordListOpen, isReserveOverlayOpen
-    )
+    ) && !hasActivePlayer
+
+    val returnPlayerFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(tabs.size) {
         if (ui.selectedTabIndex >= tabs.size) {
@@ -369,12 +376,49 @@ fun HomeLauncherScreen(
                             }
                         }
                     }
+
+                    if (hasActivePlayer) {
+                        Button(
+                            onClick = onReturnToPlayerClick,
+                            modifier = Modifier
+                                .focusRequester(returnPlayerFocusRequester)
+                                .focusProperties {
+                                    left = ui.tabFocusRequesters[tabs.lastIndex]
+                                    right = ui.settingsFocusRequester
+                                    canFocus = !(safeTabIndex == 3 && ui.isEpgJumping)
+                                    up = FocusRequester.Cancel
+                                },
+                            colors = ButtonDefaults.colors(
+                                containerColor = colors.accent.copy(alpha = 0.2f),
+                                focusedContainerColor = colors.accent,
+                                contentColor = colors.accent,
+                                focusedContentColor = if (colors.isDark) Color.Black else Color.White
+                            ),
+                            shape = ButtonDefaults.shape(shape = RoundedCornerShape(20.dp)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "再生中",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "再生中",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                    }
+
                     IconButton(
                         onClick = { onSettingsToggle(true) },
                         modifier = Modifier
                             .focusRequester(ui.settingsFocusRequester)
                             .focusProperties {
-                                left = ui.tabFocusRequesters[tabs.lastIndex]
+                                left =
+                                    if (hasActivePlayer) returnPlayerFocusRequester else ui.tabFocusRequesters[tabs.lastIndex]
                                 canFocus = !(safeTabIndex == 3 && ui.isEpgJumping)
 
                                 up = FocusRequester.Cancel
@@ -444,7 +488,7 @@ fun HomeLauncherScreen(
                             onUiReady = { onUiReady(); ui.isCurrentTabContentReady = true },
                             ticketManager = ticketManager,
                             homeViewModel = homeViewModel,
-                            timeFormat = timeFormat // ★ 追加: 12H/24H フォーマットを渡す
+                            timeFormat = timeFormat
                         )
 
                         "ライブ" -> {
@@ -467,7 +511,8 @@ fun HomeLauncherScreen(
                                 isReturningFromPlayer = isReturningFromPlayer && safeTabIndex == 1,
                                 onReturnFocusConsumed = onReturnFocusConsumed,
                                 reserveViewModel = reserveViewModel,
-                                timeFormat = timeFormat
+                                timeFormat = timeFormat,
+                                isPiPMode = hasActivePlayer // ★ これを追加！
                             )
                             LaunchedEffect(Unit) {
                                 delay(500); onUiReady(); ui.isCurrentTabContentReady = true

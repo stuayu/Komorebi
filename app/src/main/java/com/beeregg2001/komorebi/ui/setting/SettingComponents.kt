@@ -689,10 +689,12 @@ fun MultiSelectionDialogItem(
     }
 }
 
+// ★ 修正: ConfirmClearDialog に confirmButtonText 引数を追加
 @Composable
 fun ConfirmClearDialog(
     title: String,
     message: String,
+    confirmButtonText: String = AppStrings.BUTTON_DELETE, // デフォルトは「削除」
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -756,7 +758,7 @@ fun ConfirmClearDialog(
                         modifier = Modifier
                             .weight(1f)
                             .focusRequester(focusRequester)
-                    ) { Text(AppStrings.BUTTON_DELETE) }
+                    ) { Text(confirmButtonText) } // ★ 引数の変数を使用
                 }
             }
         }
@@ -764,7 +766,7 @@ fun ConfirmClearDialog(
 }
 
 // =========================================================================
-// ★追加: Gemini API キー設定用 QRコード表示画面 (Step 5)
+// Gemini API キー設定用 QRコード表示画面 (Step 5)
 // =========================================================================
 @Composable
 fun GeminiSetupDialog(
@@ -774,7 +776,7 @@ fun GeminiSetupDialog(
     onStopServer: () -> Unit,
     onDismiss: () -> Unit,
     onManualInputClick: () -> Unit,
-    onDeleteKey: () -> Unit // ★ 追加: 連携解除のコールバック
+    onDeleteKey: () -> Unit // 連携解除のコールバック
 ) {
     val colors = KomorebiTheme.colors
     var isClosing by remember { mutableStateOf(false) }
@@ -921,7 +923,6 @@ fun GeminiSetupDialog(
 
                 Spacer(Modifier.height(40.dp))
 
-                // ★ 修正: ボタンの配置を「設定済み」と「未設定」で分岐
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center

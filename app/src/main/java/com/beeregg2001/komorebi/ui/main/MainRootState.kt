@@ -43,7 +43,7 @@ class MainRootState {
     var reserveToDelete by mutableStateOf<ReserveItem?>(null)
     var openedSeriesTitle by mutableStateOf<String?>(null)
 
-    // ★ 追加: 録画リストから自動予約へ進む際のターゲット番組
+    // 録画リストから自動予約へ進む際のターゲット番組
     var selectedProgramForAutoReserve by mutableStateOf<RecordedProgram?>(null)
 
     // AIコンシェルジュ
@@ -71,6 +71,9 @@ class MainRootState {
     var showPlayerControls by mutableStateOf(true)
     var isPlayerSubMenuOpen by mutableStateOf(false)
     var isPlayerSceneSearchOpen by mutableStateOf(false)
+
+    // ★ 新規追加: アプリ内ミニプレイヤー（PiP）のフラグ
+    var isMiniPlayerMode by mutableStateOf(false)
 
     // 履歴・復帰状態
     var lastSelectedChannelId by mutableStateOf<String?>(null)
@@ -105,6 +108,7 @@ class MainRootState {
         return true
     }
 
+    // ★ 修正: ミニプレイヤー中は「フルスクリーンではない」と判定させることで、背面のUIを生かす
     fun isFullScreen(
         channel: Channel?,
         program: RecordedProgram?,
@@ -113,13 +117,16 @@ class MainRootState {
         recordListOpen: Boolean,
         reserveOverlayOpen: Boolean
     ): Boolean {
+        // もしミニプレイヤー（ワイプ）化されているなら、フルスクリーンではない
+        if (isMiniPlayerMode) return false
+
         return channel != null || program != null || epgProgram != null ||
                 settingsOpen || recordListOpen || reserveOverlayOpen ||
                 isSeriesListOpen || isAiConciergeOpen ||
                 editingCondition != null || selectedConditionReserveItem != null ||
                 selectedReserve != null || editingReserveItem != null ||
                 editingNewProgram != null || reserveToDelete != null ||
-                selectedProgramForAutoReserve != null // ★ フルスクリーン判定にも追加
+                selectedProgramForAutoReserve != null
     }
 }
 
