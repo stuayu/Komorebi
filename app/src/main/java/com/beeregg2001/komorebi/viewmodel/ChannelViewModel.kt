@@ -29,7 +29,7 @@ class ChannelViewModel @Inject constructor(
     private val _groupedChannels = MutableStateFlow<Map<String, List<Channel>>>(emptyMap())
     val groupedChannels: StateFlow<Map<String, List<Channel>>> = _groupedChannels
 
-    // ★修正: HomeViewModelの精巧な野球判定ロジックをライブチャンネル抽出にも適用
+    // ★ 修正: 野球判定ロジックの厳格化
     private val baseballKeywords = listOf(
         "阪神", "タイガース", "広島", "カープ", "DeNA", "ベイスターズ",
         "巨人", "ジャイアンツ", "ヤクルト", "スワローズ", "中日", "ドラゴンズ",
@@ -37,53 +37,90 @@ class ChannelViewModel @Inject constructor(
         "楽天", "イーグルス", "西武", "ライオンズ", "日本ハム", "ファイターズ", "プロ野球"
     )
 
+    // 中継を見たいユーザーのノイズになる番組を強力に弾く
     private val excludeKeywords = listOf(
-        "特集", "ヴィンテージ", "ハイライト", "ダイジェスト", "ニュース",
-        "名勝負", "傑作選", "セレクション", "トラリンク", "ガンガン！",
-        "伝説", "回顧", "すぽると", "熱闘", "プロ野球ニュース"
+        "プロ野球ニュース", "すぽると", "熱闘", "ダイジェスト", "ハイライト",
+        "特集", "傑作選", "名勝負", "セレクション", "回顧", "伝説", "競馬"
     )
 
-    private val matchKeywords = listOf("中継", "対", "×", "vs", "戦", "生放送", "LIVE")
+    // 単なる「生放送」や「中継」ではなく、野球に特化したワードを中心に
+    private val matchKeywords = listOf(
+        "ナイター", "デーゲーム", "ベースボール", "プロ野球中継", "実況中継",
+        "ガオトラ", "オープン戦", "公式戦", "クライマックスシリーズ", "日本シリーズ"
+    )
+
+    // 対戦カードを表す記号
+    private val versusSymbols = listOf("対", "×", "vs", "VS", "-", "ー")
 
     val baseballGroupedChannels: StateFlow<Map<String, List<Channel>>> =
         _groupedChannels.map { grouped ->
-            val filtered = grouped.mapValues { (_, channels) ->
+            grouped.mapValues { (_, channels) ->
                 channels.filter { ch ->
-                    val title = ch.programPresent?.title ?: ""
-                    val desc = ch.programPresent?.description ?: ""
-                    val nextTitle = ch.programFollowing?.title ?: ""
-                    val nextDesc = ch.programFollowing?.description ?: ""
+                    val presentTitle = ch.programPresent?.title ?: ""
+                    val presentDesc = ch.programPresent?.description ?: ""
+                    val followingTitle = ch.programFollowing?.title ?: ""
+                    val followingDesc = ch.programFollowing?.description ?: ""
 
-                    // 1. 球団名または「プロ野球」が含まれているか
-                    val hasKeyword = baseballKeywords.any { keyword ->
-                        title.contains(keyword) || desc.contains(keyword) ||
-                                nextTitle.contains(keyword) || nextDesc.contains(keyword)
+                    // ★ 修正: 現在の番組と次の番組を独立して判定するローカル関数
+                    fun isBaseballGame(title: String, desc: String): Boolean {
+                        if (title.isBlank()) return false
+
+                        val fullText = "$title $desc"
+
+                        // 1. 球団名または「プロ野球」が含まれているか（大前提）
+                        val hasKeyword = baseballKeywords.any { keyword ->
+                            fullText.contains(keyword)
+                        }
+                        if (!hasKeyword) return false
+
+                        // 2. 過去の試合や関連番組ではないか（除外判定）
+                        // ※ タイトルのみで除外判定し、説明文の「昨日のハイライト」等での誤爆を防ぐ
+                        val isExcluded = excludeKeywords.any { keyword ->
+                            title.contains(keyword)
+                        }
+                        if (isExcluded) return false
+
+                        // 3. 実際の「試合中継」であるかどうかの精査
+
+                        // パターンA: 対戦カード表記（例: 「阪神×巨人」「DeNA 対 中日」）があるか
+                        // 球団名が含まれていることは前提(1)でクリアしているので、単に「対」「×」等が含まれ、
+                        // かつタイトルに「生」「中継」が含まれていれば、ほぼ確実に試合。
+                        val hasVersusSymbol = versusSymbols.any { title.contains(it) }
+                        val hasGenericLiveWord =
+                            title.contains("中継") || title.contains("生") || title.contains(
+                                "LIVE",
+                                ignoreCase = true
+                            )
+
+                        if (hasVersusSymbol && hasGenericLiveWord) return true
+
+                        // パターンB: 野球特有の強いマッチキーワード（「ナイター」「プロ野球中継」など）が含まれているか
+                        val isStrongMatch = matchKeywords.any { keyword ->
+                            title.contains(keyword, ignoreCase = true) || desc.contains(
+                                keyword,
+                                ignoreCase = true
+                            )
+                        }
+                        if (isStrongMatch) return true
+
+                        // パターンC: タイトルが非常に短い場合（EPGの省略表記など）の救済
+                        // 例: 「[生]プロ野球」などの場合
+                        if (title.length <= 15 && title.contains("プロ野球") && hasGenericLiveWord) return true
+
+                        return false
                     }
-                    if (!hasKeyword) return@filter false
 
-                    // 2. 過去の試合やニュース番組ではないか（除外キーワード）
-                    val isExcluded = excludeKeywords.any { keyword ->
-                        title.contains(keyword) || nextTitle.contains(keyword)
-                    }
-                    if (isExcluded) return@filter false
-
-                    // 3. 実際の「試合中継」であるか（マッチキーワード）
-                    val isMatch = matchKeywords.any { keyword ->
-                        title.contains(keyword, ignoreCase = true) ||
-                                desc.contains(keyword, ignoreCase = true) ||
-                                nextTitle.contains(keyword, ignoreCase = true) ||
-                                nextDesc.contains(keyword, ignoreCase = true)
-                    }
-
-                    // スポーツジャンルの判定（EpgProgramと違い、ChannelのProgramにはGenre情報が文字列やIDで来るケースがあるため、
-                    // 今回はタイトルと説明文による精度の高いキーワードマッチング（isMatch）を最終判定の軸とします）
-                    isMatch
+                    // 現在放送中の番組、または次に放送される番組の「どちらか」が野球中継であれば表示する
+                    isBaseballGame(presentTitle, presentDesc) || isBaseballGame(
+                        followingTitle,
+                        followingDesc
+                    )
                 }
             }.filterValues { it.isNotEmpty() }
 
-            if (filtered.isEmpty()) grouped else filtered
+            // 試合が全く無い時は、空のMapを返す
         }
-            .flowOn(Dispatchers.Default) // ★最適化: Map内の重い文字列判定をバックグラウンドスレッドで実行
+            .flowOn(Dispatchers.Default)
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5000),
@@ -104,7 +141,6 @@ class ChannelViewModel @Inject constructor(
 
     private var fetchJob: Job? = null
 
-    // ★ 追加: 最後にAPIからデータを取得した時刻を記録し、タブ移動時の「鮮度」を判定する
     private var lastFetchedTimeMillis = 0L
 
     init {
@@ -195,7 +231,6 @@ class ChannelViewModel @Inject constructor(
             _groupedChannels.value = processed
             _liveRows.value = transformToUiState(processed)
 
-            // ★ 追加: 取得に成功したら、現在時刻を記録
             lastFetchedTimeMillis = System.currentTimeMillis()
         } catch (e: CancellationException) {
             Log.d("ChannelViewModel", "fetchChannelsInternal cancelled")
@@ -248,20 +283,15 @@ class ChannelViewModel @Inject constructor(
     fun startPolling() {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
-            // ★ 追加・修正: 【鮮度チェック】
-            // startPollingが呼ばれた（タブに戻ってきた）瞬間、前回取得から60秒以上経過していれば即座にAPIを叩く
             if (System.currentTimeMillis() - lastFetchedTimeMillis > 60_000L) {
                 Log.i("ChannelViewModel", "Data is stale. Fetching immediately.")
                 fetchChannelsInternal()
             }
 
             while (isActive) {
-                // ★ 追加・修正: 【分またぎ同期 (Minute-Boundary Sync)】
-                // 闇雲に60秒待つのではなく、現在時刻から「次の00秒」までの残り時間を計算して待機する
                 val now = System.currentTimeMillis()
                 val delayToNextMinute = 60_000L - (now % 60_000L)
 
-                // サーバー側の番組切り替え処理ラグを考慮し、00秒ジャストではなく「00秒の1.5秒後」にAPIを叩く
                 delay(delayToNextMinute + 1500L)
 
                 if (isActive) {
