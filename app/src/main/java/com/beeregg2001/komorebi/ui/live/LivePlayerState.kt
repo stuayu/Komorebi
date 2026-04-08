@@ -191,14 +191,26 @@ class LivePlayerState(
         if (keyCode == android.view.KeyEvent.KEYCODE_BACK || keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
             if (this.isDualDisplayMode) {
                 // 2画面時はPiPを許可せず、2画面の解除を行う
-                if (isActionUp) {
-                    this.isDualDisplayMode = false
-                    this.leftScreenWeight = 1f
-                    this.rightScreenWeight = 1f
-                    this.previousStreamSource?.let {
-                        this.currentStreamSource = it
-                        this.previousStreamSource = null
+                if (isActionDown) {
+                    // ★ 修正: サブメニュー等の他のレイヤーが開いていてDownイベントが消費された場合は記録しない
+                    if (repeatCount == 0) {
+                        backKeyDownTime = System.currentTimeMillis()
                     }
+                    return true
+                } else if (isActionUp) {
+                    // ★ 修正: この画面で正常にDownイベントをキャッチしていた場合のみ、解除処理を行う
+                    if (backKeyDownTime > 0) {
+                        this.isDualDisplayMode = false
+                        this.leftScreenWeight = 1f
+                        this.rightScreenWeight = 1f
+                        this.previousStreamSource?.let {
+                            this.currentStreamSource = it
+                            this.previousStreamSource = null
+                        }
+                    }
+                    // リセットして次の入力に備える
+                    backKeyDownTime = 0L
+                    return true
                 }
                 return true
             }
