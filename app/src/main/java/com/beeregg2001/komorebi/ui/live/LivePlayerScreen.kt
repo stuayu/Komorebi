@@ -62,6 +62,7 @@ import com.beeregg2001.komorebi.data.model.Channel
 import com.beeregg2001.komorebi.data.model.LivePlayerConstants
 import com.beeregg2001.komorebi.data.model.StreamSource
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
+import com.google.android.material.timepicker.TimeFormat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -107,7 +108,8 @@ fun LivePlayerScreen(
     channelViewModel: ChannelViewModel = hiltViewModel(),
     reserveViewModel: ReserveViewModel = hiltViewModel(),
     epgViewModel: EpgViewModel = hiltViewModel(),
-    settingsViewModel: SettingsViewModel = hiltViewModel()
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
+    timeFormat: String = "24H"
 ) {
     val context = LocalContext.current
     val colors = KomorebiTheme.colors
@@ -1058,7 +1060,7 @@ fun LivePlayerScreen(
         }
 
         androidx.compose.animation.AnimatedVisibility(visible = !isPiPMode && !ps.isDualDisplayMode && isPinnedOverlay && ps.playerError == null) {
-            StatusOverlay(currentChannelItem, mirakurunIp, mirakurunPort, konomiIp, konomiPort)
+            StatusOverlay(currentChannelItem, mirakurunIp, mirakurunPort, konomiIp, konomiPort, timeFormat)
         }
 
         androidx.compose.animation.AnimatedVisibility(
@@ -1075,7 +1077,8 @@ fun LivePlayerScreen(
                 konomiPort,
                 isManualOverlay,
                 isRecording,
-                scrollState
+                scrollState,
+                timeFormat
             )
         }
 

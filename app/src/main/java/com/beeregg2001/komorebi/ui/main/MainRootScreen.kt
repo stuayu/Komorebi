@@ -904,7 +904,8 @@ fun MainRootScreen(
                                     onPiPRequested = {
                                         state.isMiniPlayerMode = true
                                         state.toastMessage = "ミニプレイヤーに変更しました"
-                                    }
+                                    },
+                                    timeFormat = timeFormat
                                 )
                             } else if (state.selectedProgram != null) {
                                 VideoPlayerScreen(
