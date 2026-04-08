@@ -57,7 +57,7 @@ fun HomeContents(
     isTopNavFocused: Boolean = false,
     ticketManager: HomeFocusTicketManager,
     homeViewModel: HomeViewModel,
-    timeFormat: String // ★ 追加: 12H/24H フォーマットを受け取る
+    timeFormat: String
 ) {
     val lazyListState = rememberTvLazyListState()
     val isFirstItemRendered =
@@ -109,10 +109,6 @@ fun HomeContents(
         }
     }
 
-    LaunchedEffect(lastWatchedChannels.isNotEmpty()) {
-        if (lastWatchedChannels.isNotEmpty()) lazyListState.scrollToItem(0)
-    }
-
     val topSection =
         remember(lastWatchedChannels, hotChannels, genrePickup, watchHistory, upcomingReserves) {
             when {
@@ -136,6 +132,7 @@ fun HomeContents(
             list
         }
 
+    // ★ 修正(Step4): AIコンシェルジュ復帰などで HOME_RESTORE チケットが発行された時のスクロール処理を強化
     LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
         if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE) {
             val targetSection = ticketManager.targetSection
@@ -146,9 +143,14 @@ fun HomeContents(
                         "KomorebiFocus",
                         "[$TAG] 第1段階: 対象セクション($targetSection) インデックス $index へ縦スクロール"
                     )
+                    delay(50)
                     lazyListState.scrollToItem(index)
+                    // スクロール後、各Sectionコンポーネント内にある FocusRequester が itemId を見て自動フォーカスを拾います
+                    delay(200)
                 }
             }
+            // 消費
+            ticketManager.consume(HomeFocusTicket.HOME_RESTORE)
         }
     }
 
@@ -244,7 +246,7 @@ fun HomeContents(
                             ticketManager = ticketManager,
                             homeViewModel = homeViewModel,
                             sectionId = "pickup",
-                            timeFormat = timeFormat // ★ 追加
+                            timeFormat = timeFormat
                         )
                     }
                 }
@@ -276,7 +278,7 @@ fun HomeContents(
                             ticketManager = ticketManager,
                             homeViewModel = homeViewModel,
                             sectionId = "upcoming",
-                            timeFormat = timeFormat // ★ 追加
+                            timeFormat = timeFormat
                         )
                     }
                 }

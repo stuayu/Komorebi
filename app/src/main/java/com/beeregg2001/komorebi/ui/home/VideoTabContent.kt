@@ -84,7 +84,10 @@ fun VideoTabContent(
     isReturningFromPlayer: Boolean = false,
     lastPlayedProgramId: String? = null,
     onReturnFocusConsumed: () -> Unit = {},
-    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
+    timeFormat: String = "24H",
+    // ★ 追加(Step4): AIコンシェルジュ復帰シグナルを受け取る
+    aiFocusReturnTick: Int = 0,
+    onAiReturnConsumed: () -> Unit = {}
 ) {
     val colors = KomorebiTheme.colors
 
@@ -140,6 +143,19 @@ fun VideoTabContent(
             if (currentHeroInfo?.title == detail.title) {
                 currentHeroInfo = currentHeroInfo?.copy(description = newDesc)
             }
+        }
+    }
+
+    // ★ 追加(Step4): AIコンシェルジュから戻ってきた時のフォーカス復元（記憶しているIDからチケットを発行）
+    LaunchedEffect(aiFocusReturnTick) {
+        if (aiFocusReturnTick > 0) {
+            delay(150)
+            if (focusedProgramId != null) {
+                ticketManager.issue(FocusTicket.TARGET_ID, focusedProgramId!!)
+            } else {
+                contentFirstItemRequester.safeRequestFocusWithRetry("VideoTabFallbackAiReturn")
+            }
+            onAiReturnConsumed()
         }
     }
 
@@ -277,7 +293,6 @@ fun VideoTabContent(
                                             focusedProgramId = program.id
                                             recordViewModel.fetchProgramDetail(program.id)
 
-                                            // ★ 修正: Hero用に timeFormat に応じた日付+時刻のフォーマットを生成
                                             val startFormat = try {
                                                 val pattern =
                                                     if (timeFormat == "12H") "yyyy/M/d(E) a h:mm" else "yyyy/M/d(E) HH:mm"
@@ -318,7 +333,7 @@ fun VideoTabContent(
                                             if (index == itemsToTake.lastIndex) right =
                                                 FocusRequester.Cancel
                                         },
-                                        timeFormat = timeFormat // ★ 追加
+                                        timeFormat = timeFormat
                                     )
                                 }
                             }
@@ -422,7 +437,11 @@ fun VideoTabContent(
                                                 if (index == genreList.lastIndex) right =
                                                     FocusRequester.Cancel
                                             }
-                                            .onFocusChanged { isFocused = it.hasFocus },
+                                            .onFocusChanged {
+                                                isFocused =
+                                                    it.hasFocus; if (isFocused) focusedProgramId =
+                                                null
+                                            },
                                         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
                                         colors = ClickableSurfaceDefaults.colors(
                                             containerColor = if (isSelected) colors.textPrimary else Color.Transparent,
@@ -476,7 +495,7 @@ fun VideoTabContent(
                                         konomiPort = konomiPort,
                                         onClick = { recordViewModel.searchRecordings(series.displayTitle); onShowAllRecordings() },
                                         onFocus = {
-                                            focusedProgramId = null
+                                            focusedProgramId = null // シリーズには特定のVideoIDがないためnull
                                             pendingHeroInfo = HomeHeroInfo(
                                                 title = series.displayTitle,
                                                 subtitle = "録画エピソード: ${series.programCount}件",
@@ -506,6 +525,8 @@ fun VideoTabContent(
     }
 }
 
+// ---------------- 以下、既存のカードコンポーネント等は一切変更なし ----------------
+
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 private fun VideoRecentRecordCard(
@@ -519,7 +540,7 @@ private fun VideoRecentRecordCard(
     isCurrentlyRecording: Boolean = false,
     ticketManager: FocusTicketManager,
     onReturnFocusConsumed: () -> Unit,
-    timeFormat: String // ★ 追加: 12H/24H フォーマットを受け取る
+    timeFormat: String
 ) {
     val colors = KomorebiTheme.colors
     var isFocused by remember { mutableStateOf(false) }
@@ -590,7 +611,6 @@ private fun VideoRecentRecordCard(
                     .align(Alignment.BottomStart)
                     .padding(16.dp)
             ) {
-                // ★ 修正: timeFormat に応じたカード上の日付+時刻のフォーマット
                 val startFormat = try {
                     val pattern = if (timeFormat == "12H") "M/d(E) a h:mm" else "M/d(E) HH:mm"
                     OffsetDateTime.parse(program.startTime)

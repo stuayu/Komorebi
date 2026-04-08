@@ -87,12 +87,13 @@ fun EpgNavigationContainer(
     activeSearchQuery: String,
     searchResults: List<UiSearchResultItem>,
     isSearching: Boolean,
-    onClearSearch: () -> Unit
+    onClearSearch: () -> Unit,
+    timeFormat: String
 ) {
     val scope = rememberCoroutineScope()
     val colors = KomorebiTheme.colors
 
-    val timeFormat by settingsViewModel.timeFormat.collectAsState()
+//    val timeFormat by settingsViewModel.timeFormat.collectAsState()
 
     var isInternalJumping by remember { mutableStateOf(false) }
 

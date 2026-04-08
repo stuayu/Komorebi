@@ -101,7 +101,10 @@ fun ReserveListScreen(
     isReturningFromPlayer: Boolean = false,
     onReturnFocusConsumed: () -> Unit = {},
     viewModel: ReserveViewModel = hiltViewModel(),
-    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
+    timeFormat: String = "24H",
+    // ★ 追加(Step3): AIコンシェルジュからの復帰シグナル
+    aiFocusReturnTick: Int = 0,
+    onAiReturnConsumed: () -> Unit = {}
 ) {
     val reserves by viewModel.reserves.collectAsState()
     val normalReserves by viewModel.normalReserves.collectAsState()
@@ -125,6 +128,24 @@ fun ReserveListScreen(
     val conditionListState = rememberTvLazyListState()
 
     var previousOverlayOpen by remember { mutableStateOf(isReserveOverlayOpen) }
+
+    // ★ 追加(Step3): AIコンシェルジュから戻ってきた時のフォーカス復元（チケット発行）
+    LaunchedEffect(aiFocusReturnTick) {
+        if (aiFocusReturnTick > 0) {
+            Log.i("KomorebiFocus", "[ReserveList] AIコンシェルジュから復帰。チケットを発行します。")
+            delay(150) // パネルが閉じるアニメーションを待つ
+            val conditionId = viewModel.lastClickedConditionId
+            val reserveId = viewModel.lastClickedReserveId
+            if (conditionId != null) {
+                ticketManager.issueForCondition(conditionId)
+            } else if (reserveId != null) {
+                ticketManager.issueForReserve(reserveId)
+            } else {
+                ticketManager.issueForTop()
+            }
+            onAiReturnConsumed()
+        }
+    }
 
     LaunchedEffect(isReturningFromPlayer) {
         if (isReturningFromPlayer) {
@@ -480,7 +501,7 @@ fun ReserveListScreen(
                                                     viewModel.lastClickedConditionId = null
                                                 }
                                             },
-                                        timeFormat = timeFormat // ★ 追加: ReserveCard に timeFormat を渡す
+                                        timeFormat = timeFormat
                                     )
                                 }
                             }
@@ -538,7 +559,7 @@ fun ReserveListScreen(
                                                     viewModel.lastClickedConditionId = null
                                                 }
                                             },
-                                        timeFormat = timeFormat // ★ 追加: ReserveCard に timeFormat を渡す
+                                        timeFormat = timeFormat
                                     )
                                 }
                             }

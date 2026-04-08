@@ -70,9 +70,11 @@ fun RecordListScreen(
     lastPlayedProgramId: Int? = null,
     onReturnFocusConsumed: () -> Unit = {},
     timeFormat: String = "24H",
-    // ★ 追加: 自動予約のキーワードリストとコールバック
     autoReserveKeywords: List<String> = emptyList(),
-    onAutoReserveClick: (RecordedProgram) -> Unit = {}
+    onAutoReserveClick: (RecordedProgram) -> Unit = {},
+    // ★ 追加(Step3): AIコンシェルジュ復帰シグナルを受け取る
+    aiFocusReturnTick: Int = 0,
+    onAiReturnConsumed: () -> Unit = {}
 ) {
     val colors = KomorebiTheme.colors
     val scope = rememberCoroutineScope()
@@ -269,6 +271,30 @@ fun RecordListScreen(
 
     val currentTicket = ticketManager.currentTicket
     val issueTime = ticketManager.issueTime
+
+    // ★ 修正(Step3): AIコンシェルジュから戻ってきた時のフォーカス復元（チケット発行）
+    LaunchedEffect(aiFocusReturnTick) {
+        if (aiFocusReturnTick > 0) {
+            // 1. ホームタブのアプローチ1と同様に、ウィンドウフォーカス復帰やON_RESUMEのリスト更新が落ち着くまで十分待つ
+            delay(400)
+
+            // 2. 現在のカテゴリに応じて、復帰対象のIDを適切に取得する
+            val targetId = if (selectedCategory == RecordCategory.SERIES) {
+                focusedSeries?.representativeVideoId
+            } else {
+                focusedProgram?.id
+            }
+
+            // 3. チケット発行
+            if (targetId != null) {
+                ticketManager.issue(FocusTicket.TARGET_ID, targetId)
+            } else {
+                ticketManager.issue(FocusTicket.LIST_TOP)
+            }
+
+            onAiReturnConsumed()
+        }
+    }
 
     LaunchedEffect(currentTicket, issueTime, isListFirstItemReady, hasContent, isLoadingAny) {
         when (currentTicket) {
@@ -533,7 +559,6 @@ fun RecordListScreen(
                                         listContentDownRequester = it
                                     },
                                     timeFormat = timeFormat,
-                                    // ★ 追加: 自動予約の引数を伝播させる
                                     autoReserveKeywords = autoReserveKeywords,
                                     onAutoReserveClick = onAutoReserveClick
                                 )

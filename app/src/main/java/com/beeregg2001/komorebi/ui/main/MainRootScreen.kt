@@ -123,12 +123,30 @@ fun MainRootScreen(
         }
     }
 
+    // ★ 修正: AIコンシェルジュを閉じる際の共通ロジック
+    // restoreFocus: 閉じた後に元の画面のフォーカスを復元するかどうか（別画面へ遷移する場合はfalse）
+    val closeAiConcierge = { restoreFocus: Boolean ->
+        state.isAiConciergeOpen = false
+        aiConciergeViewModel.resetState()
+
+        if (restoreFocus) {
+            // 番組表タブにいる場合は、EPG固有のリストアを使用（無駄な自動ジャンプを回避）
+            if (state.currentTabIndex == 3) {
+                epgViewModel.triggerRestore()
+            } else {
+                // それ以外のタブではシグナルを発火させ、呼び出し先の画面（HomeLauncherScreen等）にフォーカス復元を委譲する
+                state.aiFocusReturnTick++
+            }
+        }
+        epgViewModel.clearSearch()
+    }
+
     LaunchedEffect(Unit) {
         aiConciergeViewModel.pendingAction.collect { action ->
             when (action) {
                 is AiConciergeAction.PlayLive -> {
-                    state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState()
+                    // ★ 修正: プレイヤーへ遷移するためフォーカス復元は不要（false）
+                    closeAiConcierge(false)
                     val target = channelViewModel.groupedChannels.value.values.flatten()
                         .find { it.id == action.channelId }
                     if (target != null) {
@@ -137,7 +155,7 @@ fun MainRootScreen(
                         state.playerIsSubMenuOpen = false
                         state.isPlayerSubMenuOpen = false
                         state.isPlayerSceneSearchOpen = false
-                        state.isMiniPlayerMode = false // ★ 追加
+                        state.isMiniPlayerMode = false
 
                         state.selectedChannel = target
                         state.lastSelectedChannelId = target.id
@@ -147,8 +165,8 @@ fun MainRootScreen(
                 }
 
                 is AiConciergeAction.PlayRecorded -> {
-                    state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState()
+                    // ★ 修正: プレイヤーへ遷移するためフォーカス復元は不要（false）
+                    closeAiConcierge(false)
                     val target =
                         recordViewModel.recentRecordings.value.find { it.id == action.videoId }
                     if (target != null) {
@@ -157,7 +175,7 @@ fun MainRootScreen(
                         state.playerIsSubMenuOpen = false
                         state.isPlayerSubMenuOpen = false
                         state.isPlayerSceneSearchOpen = false
-                        state.isMiniPlayerMode = false // ★ 追加
+                        state.isMiniPlayerMode = false
 
                         state.initialPlaybackPositionMs = 0L
                         state.selectedProgram = target
@@ -168,8 +186,8 @@ fun MainRootScreen(
                 }
 
                 is AiConciergeAction.SearchEpg -> {
-                    state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState()
+                    // ★ 修正: EPGタブへ遷移するため元の画面のフォーカス復元は不要（false）
+                    closeAiConcierge(false)
 
                     val isOnlyDate =
                         action.keyword.isBlank() && action.genre.isBlank() && action.date.isNotBlank() && !action.isLiveOnly && action.channelName.isBlank()
@@ -205,8 +223,8 @@ fun MainRootScreen(
                 }
 
                 is AiConciergeAction.SearchRecord -> {
-                    state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState()
+                    // ★ 修正: ビデオタブへ遷移するためフォーカス復元は不要（false）
+                    closeAiConcierge(false)
 
                     state.currentTabIndex = 2 // ビデオタブ
                     state.isRecordListOpen = true
@@ -260,16 +278,16 @@ fun MainRootScreen(
                 }
 
                 is AiConciergeAction.ReserveSingle -> {
-                    state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState()
+                    // ★ 修正: 予約処理のみで画面遷移しないため、元の画面にフォーカス復元（true）
+                    closeAiConcierge(true)
                     reserveViewModel.addReserve(action.programId) {
                         state.toastMessage = "番組の録画予約を完了しました"
                     }
                 }
 
                 is AiConciergeAction.ReserveAuto -> {
-                    state.isAiConciergeOpen = false
-                    aiConciergeViewModel.resetState()
+                    // ★ 修正: 予約処理のみで画面遷移しないため、元の画面にフォーカス復元（true）
+                    closeAiConcierge(true)
 
                     Log.i(TAG, "=== 自動予約登録（AIコンシェルジュから） ===")
                     Log.i(TAG, "キーワード: ${action.keyword}")
@@ -440,11 +458,8 @@ fun MainRootScreen(
 
         when {
             state.isAiConciergeOpen -> {
-                state.isAiConciergeOpen = false
-                state.isReturningFromPlayer = true
-                epgViewModel.triggerRestore()
-                epgViewModel.clearSearch()
-                aiConciergeViewModel.resetState()
+                // ★ 修正: 無条件にプレイヤー復帰フラグを立てるのをやめ、共通の閉じる処理（シグナル発火）を呼び出す
+                closeAiConcierge(true)
             }
 
             state.selectedConditionReserveItem != null -> state.selectedConditionReserveItem = null
@@ -456,7 +471,6 @@ fun MainRootScreen(
 
             state.showDeleteConfirmDialog -> state.showDeleteConfirmDialog = false
 
-            // ★ PiPモードで戻るを押した場合はPiPを解除する
             state.isMiniPlayerMode -> {
                 state.isMiniPlayerMode = false
                 state.toastMessage = "フルスクリーンに戻りました"
@@ -471,13 +485,13 @@ fun MainRootScreen(
 
             state.selectedChannel != null -> {
                 state.selectedChannel = null; state.isReturningFromPlayer = true
-                state.isMiniPlayerMode = false // 終了時はPiPも解除
+                state.isMiniPlayerMode = false
             }
 
             state.selectedProgram != null -> {
                 state.selectedProgram = null; state.showPlayerControls =
                     true; state.isReturningFromPlayer = true
-                state.isMiniPlayerMode = false // 終了時はPiPも解除
+                state.isMiniPlayerMode = false
             }
 
             state.isSettingsOpen -> closeSettingsAndRefresh()
@@ -588,9 +602,11 @@ fun MainRootScreen(
                     val showHomeLayer =
                         (state.selectedChannel == null && state.selectedProgram == null) || state.isMiniPlayerMode
                     if (showHomeLayer) {
-                        Box(modifier = Modifier
-                            .fillMaxSize()
-                            .zIndex(0f)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(0f)
+                        ) {
                             when {
                                 state.isRecordListOpen -> {
                                     RecordListScreen(
@@ -616,7 +632,7 @@ fun MainRootScreen(
                                             state.lastPlayedRecordingId = program.id
                                             state.showPlayerControls = true
                                             state.isReturningFromPlayer = false
-                                            state.isMiniPlayerMode = false // 新規再生時はフルスクリーンに
+                                            state.isMiniPlayerMode = false
                                         },
                                         onBack = {
                                             state.isRecordListOpen = false
@@ -728,7 +744,7 @@ fun MainRootScreen(
                                                 state.lastSelectedProgramId = null
                                                 homeViewModel.saveLastChannel(channel)
                                                 state.isReturningFromPlayer = false
-                                                state.isMiniPlayerMode = false // フルスクリーンに
+                                                state.isMiniPlayerMode = false
                                             }
                                         },
                                         selectedProgram = state.selectedProgram,
@@ -747,7 +763,7 @@ fun MainRootScreen(
                                                 state.lastSelectedChannelId = null
                                                 state.showPlayerControls = true
                                                 state.isReturningFromPlayer = false
-                                                state.isMiniPlayerMode = false // フルスクリーンに
+                                                state.isMiniPlayerMode = false
                                             }
                                         },
                                         onReserveSelected = { reserveItem ->
@@ -797,11 +813,13 @@ fun MainRootScreen(
                                         isUiReadyFlag = state.isUiReady,
                                         settingsViewModel = settingsViewModel,
                                         timeFormat = timeFormat,
-                                        // ★ 追加: 再生中の場合は、TopBar横に「再生中」ボタンを表示するフラグ
                                         hasActivePlayer = state.isMiniPlayerMode,
                                         onReturnToPlayerClick = {
-                                            state.isMiniPlayerMode = false // フルスクリーンへ復帰
-                                        }
+                                            state.isMiniPlayerMode = false
+                                        },
+                                        // ★ 追加: AIコンシェルジュ復帰シグナルの伝達
+                                        aiFocusReturnTick = state.aiFocusReturnTick,
+                                        onAiReturnConsumed = { state.aiFocusReturnTick = 0 }
                                     )
                                 }
                             }
@@ -841,7 +859,6 @@ fun MainRootScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .zIndex(1f) // 手前に配置
-                                // 背面を操作できるように、ミニプレイヤー化している時はタッチやフォーカスを受け流す
                                 .let {
                                     if (state.isMiniPlayerMode) it
                                         .padding(
@@ -880,10 +897,9 @@ fun MainRootScreen(
                                     onBackPressed = {
                                         state.selectedChannel = null; state.isReturningFromPlayer =
                                         true
-                                        state.isMiniPlayerMode = false // 終了時はPiPも解除
+                                        state.isMiniPlayerMode = false
                                     },
                                     onShowToast = { state.toastMessage = it },
-                                    // ★ 追加: PiP状態の伝達
                                     isPiPMode = state.isMiniPlayerMode,
                                     onPiPRequested = {
                                         state.isMiniPlayerMode = true
@@ -905,10 +921,9 @@ fun MainRootScreen(
                                     onBackPressed = {
                                         state.selectedProgram = null; state.isReturningFromPlayer =
                                         true
-                                        state.isMiniPlayerMode = false // 終了時はPiPも解除
+                                        state.isMiniPlayerMode = false
                                     },
                                     onShowToast = { state.toastMessage = it },
-                                    // ★ 追加: PiP状態の伝達
                                     isPiPMode = state.isMiniPlayerMode,
                                     onPiPRequested = {
                                         state.isMiniPlayerMode = true
@@ -1301,11 +1316,8 @@ fun MainRootScreen(
                 isRecording = isRecordingVoice,
                 ticketManager = aiTicketManager,
                 onClose = {
-                    state.isAiConciergeOpen = false
-                    state.isReturningFromPlayer = true
-                    epgViewModel.triggerRestore()
-                    epgViewModel.clearSearch()
-                    aiConciergeViewModel.resetState()
+                    // ★ 修正: 無条件にプレイヤー復帰フラグを立てるのをやめ、共通の閉じる処理（シグナル発火）を呼び出す
+                    closeAiConcierge(true)
                 },
                 onMicLongPressStart = {
                     if (ContextCompat.checkSelfPermission(

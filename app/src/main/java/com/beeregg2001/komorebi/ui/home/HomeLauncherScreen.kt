@@ -111,7 +111,9 @@ fun HomeLauncherScreen(
     onReturnFocusConsumed: () -> Unit = {},
     timeFormat: String = "24H",
     hasActivePlayer: Boolean = false,
-    onReturnToPlayerClick: () -> Unit = {}
+    onReturnToPlayerClick: () -> Unit = {},
+    aiFocusReturnTick: Int = 0,
+    onAiReturnConsumed: () -> Unit = {}
 ) {
     val ui = rememberHomeLauncherState(
         initialTabIndex,
@@ -137,7 +139,7 @@ fun HomeLauncherScreen(
 
     val safeTabIndex = ui.selectedTabIndex.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
 
-    // ★ 修正: PiP（ミニプレイヤー）モード中は「フルスクリーンではない」と判定させ、トップナビを確実に描画する
+    // PiP（ミニプレイヤー）モード中は「フルスクリーンではない」と判定させ、トップナビを確実に描画する
     val isFullScreenMode = ui.isFullScreen(
         selectedChannel, selectedProgram, epgSelectedProgram,
         isSettingsOpen, isRecordListOpen, isReserveOverlayOpen
@@ -166,6 +168,50 @@ fun HomeLauncherScreen(
             channelViewModel.startPolling()
         } else {
             channelViewModel.stopPolling()
+        }
+    }
+
+    // AIコンシェルジュ復帰シグナルの交通整理
+    LaunchedEffect(aiFocusReturnTick) {
+        if (aiFocusReturnTick > 0) {
+            delay(150)
+            when (safeTabIndex) {
+                0 -> {
+                    // ホームタブ
+                    val section = homeViewModel.lastClickedSection
+                    val itemId = homeViewModel.lastClickedItemId
+                    if (section != null && itemId != null) {
+                        ticketManager.issueForHomeRestore(section, itemId)
+                    } else {
+                        ticketManager.issue(HomeFocusTicket.CONTENT_TOP)
+                    }
+                    // ★ HomeContents側でシグナルを消費しない設計にしたため、ここで消費する
+                    onAiReturnConsumed()
+                }
+
+                1 -> {
+                    // ライブタブ: LiveContent 内部のロジックにシグナルを委譲するため、ここでは消費しない
+                }
+
+                2 -> {
+                    // ビデオタブ: VideoTabContent 内部のロジックにシグナルを委譲するため、ここでは消費しない
+                }
+
+                4 -> {
+                    // 録画予約タブ: ReserveListScreen 内部のロジックにシグナルを委譲するため、ここでは消費しない
+                }
+
+                5 -> {
+                    // プロ野球タブ:
+                    ui.contentFirstItemRequesters[5].safeRequestFocusWithRetry("BaseballAiReturn")
+                    onAiReturnConsumed()
+                }
+
+                else -> {
+                    ui.tabFocusRequesters[safeTabIndex].safeRequestFocusWithRetry("FallbackAiReturn")
+                    onAiReturnConsumed()
+                }
+            }
         }
     }
 
@@ -512,7 +558,10 @@ fun HomeLauncherScreen(
                                 onReturnFocusConsumed = onReturnFocusConsumed,
                                 reserveViewModel = reserveViewModel,
                                 timeFormat = timeFormat,
-                                isPiPMode = hasActivePlayer // ★ これを追加！
+                                isPiPMode = hasActivePlayer,
+                                // ★ シグナルを委譲
+                                aiFocusReturnTick = if (safeTabIndex == 1) aiFocusReturnTick else 0,
+                                onAiReturnConsumed = onAiReturnConsumed
                             )
                             LaunchedEffect(Unit) {
                                 delay(500); onUiReady(); ui.isCurrentTabContentReady = true
@@ -521,29 +570,25 @@ fun HomeLauncherScreen(
 
                         "ビデオ" -> {
                             VideoTabContent(
-                                konomiIp = konomiIp,
-                                konomiPort = konomiPort,
-                                tabFocusRequester = ui.tabFocusRequesters[2],
-                                contentFirstItemRequester = ui.contentFirstItemRequesters[2],
-                                onProgramClick = { program ->
-                                    val betterProgram =
-                                        ui.recentRecordings.find { it.id == program.id }
-                                    onProgramSelected(
-                                        betterProgram?.copy(playbackPosition = program.playbackPosition)
-                                            ?: program
-                                    )
-                                },
+                                recordViewModel = recordViewModel,
+                                onProgramClick = { onProgramSelected(it) },
                                 onShowAllRecordings = onShowAllRecordings,
-                                onShowSeriesList = { ui.isSeriesListOpen = true },
+                                onShowSeriesList = onShowSeriesList,
                                 openedSeriesTitle = ui.openedSeriesTitle,
                                 onOpenedSeriesTitleChange = { ui.openedSeriesTitle = it },
-                                recordViewModel = recordViewModel,
-                                watchHistory = ui.watchHistory,
+                                tabFocusRequester = ui.tabFocusRequesters[2],
+                                contentFirstItemRequester = ui.contentFirstItemRequesters[2],
                                 isTopNavFocused = ui.topNavHasFocus,
                                 isReturningFromPlayer = isReturningFromPlayer && safeTabIndex == 2,
                                 lastPlayedProgramId = lastPlayerProgramId,
                                 onReturnFocusConsumed = onReturnFocusConsumed,
-                                timeFormat = timeFormat
+                                konomiIp = konomiIp,
+                                konomiPort = konomiPort,
+                                timeFormat = timeFormat,
+                                watchHistory = ui.watchHistory,
+                                // ★ シグナルを委譲
+                                aiFocusReturnTick = if (safeTabIndex == 2) aiFocusReturnTick else 0,
+                                onAiReturnConsumed = onAiReturnConsumed
                             )
                             LaunchedEffect(Unit) {
                                 delay(500); onUiReady(); ui.isCurrentTabContentReady = true
@@ -575,7 +620,8 @@ fun HomeLauncherScreen(
                                 activeSearchQuery = epgViewModel.activeSearchQuery.collectAsState().value,
                                 searchResults = epgViewModel.searchResults.collectAsState().value,
                                 isSearching = epgViewModel.isSearching.collectAsState().value,
-                                onClearSearch = { epgViewModel.clearSearch() }
+                                onClearSearch = { epgViewModel.clearSearch() },
+                                timeFormat = timeFormat
                             )
                             LaunchedEffect(Unit) {
                                 delay(800); onUiReady(); ui.isCurrentTabContentReady = true
@@ -595,7 +641,9 @@ fun HomeLauncherScreen(
                                 isReserveOverlayOpen = isReserveOverlayOpen,
                                 isReturningFromPlayer = isReturningFromPlayer && safeTabIndex == 4,
                                 onReturnFocusConsumed = onReturnFocusConsumed,
-                                timeFormat = timeFormat
+                                timeFormat = timeFormat,
+                                aiFocusReturnTick = if (safeTabIndex == 4) aiFocusReturnTick else 0,
+                                onAiReturnConsumed = onAiReturnConsumed
                             )
                             LaunchedEffect(Unit) {
                                 delay(500); onUiReady(); ui.isCurrentTabContentReady = true

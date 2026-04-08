@@ -56,6 +56,7 @@ import com.beeregg2001.komorebi.viewmodel.*
 import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private const val TAG = "LiveContent"
 
@@ -75,8 +76,10 @@ fun LiveContent(
     isReturningFromPlayer: Boolean = false, onReturnFocusConsumed: () -> Unit = {},
     reserveViewModel: ReserveViewModel,
     timeFormat: String = "24H",
-    // ★ 追加: ミニプレイヤー（PiP）モードのフラグを受け取る
-    isPiPMode: Boolean = false
+    isPiPMode: Boolean = false,
+    // ★ 追加: AI復帰シグナル
+    aiFocusReturnTick: Int = 0,
+    onAiReturnConsumed: () -> Unit = {}
 ) {
     val liveRows by channelViewModel.liveRows.collectAsState()
     val listState = rememberLazyListState()
@@ -95,6 +98,47 @@ fun LiveContent(
 
     var pendingChannel by remember { mutableStateOf<UiChannelState?>(null) }
     var focusedChannel by remember { mutableStateOf<UiChannelState?>(null) }
+
+    // ★ 追加(Step4): AIコンシェルジュ復帰時のスクロール＆フォーカス処理
+    // 記憶している lastFocusedChannelId から「何行目の何番目か」を計算して戻ります。
+    LaunchedEffect(aiFocusReturnTick) {
+        if (aiFocusReturnTick > 0) {
+            delay(150)
+            val targetId = lastFocusedChannelId
+            if (targetId != null && liveRows.isNotEmpty()) {
+                var rowIndex = -1
+                var colIndex = -1
+                var genreId = ""
+
+                // 二次元配列（liveRows）の中から、対象のチャンネルIDを持つ要素のインデックスを探す
+                for (i in liveRows.indices) {
+                    val idx = liveRows[i].channels.indexOfFirst { it.channel.id == targetId }
+                    if (idx != -1) {
+                        rowIndex = i
+                        colIndex = idx
+                        genreId = liveRows[i].genreId
+                        break
+                    }
+                }
+
+                if (rowIndex != -1 && colIndex != -1) {
+                    // 行方向（縦）のスクロール
+                    listState.scrollToItem(maxOf(0, rowIndex))
+                    // 列方向（横）のスクロール
+                    val rState = rowStates.getOrPut(genreId) { LazyListState() }
+                    rState.scrollToItem(maxOf(0, colIndex - 1))
+
+                    delay(200)
+                    targetChannelFocusRequester.safeRequestFocusWithRetry("LiveChannelAiReturn")
+                } else {
+                    contentFirstItemRequester.safeRequestFocusWithRetry("LiveFirstItemAiReturn")
+                }
+            } else {
+                contentFirstItemRequester.safeRequestFocusWithRetry("LiveFirstItemAiReturn")
+            }
+            onAiReturnConsumed()
+        }
+    }
 
     LaunchedEffect(pendingChannel) {
         if (pendingChannel != null) {
@@ -181,9 +225,6 @@ fun LiveContent(
             Column(
                 modifier = modifier
                     .fillMaxSize()
-                    // ★ 修正: プレイヤーが前面に出ているか、PiPモード中はライブタブのUIからフォーカスを奪えないようにする
-                    // （※ ただしPiP時は裏側のUIを操作できるようにしたいため、isPiPModeは除外します。
-                    // 　　つまり、完全なフルスクリーン時(isPlayerActive && !isPiPMode)のみ操作不可にします）
                     .then(if (isPlayerActive && !isPiPMode) Modifier.focusProperties {
                         up = FocusRequester.Cancel
                         down = FocusRequester.Cancel
@@ -276,9 +317,6 @@ fun LiveContent(
             }
         }
 
-        // ★ 修正: PiPモード中（すでに別の映像が再生されている）、
-        // もしくは「別の番組をフルスクリーンで視聴中」の場合は、
-        // 裏側でのライブタブのプレビュー再生（LivePlayerScreen）を強制停止し、デコーダーの競合とメモリ不足を防ぐ！
         if (selectedChannel != null && !isPiPMode) {
             LivePlayerScreen(
                 channel = selectedChannel,

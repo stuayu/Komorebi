@@ -53,6 +53,9 @@ class MainRootState {
 
     val aiTicketManager = AiFocusTicketManager()
 
+    // ★ 追加: AIコンシェルジュからの復帰シグナル（カウンター）を追加
+    var aiFocusReturnTick by mutableIntStateOf(0)
+
     // 各種オーバーレイの開閉状態
     var isEpgJumpMenuOpen by mutableStateOf(false)
     var isSettingsOpen by mutableStateOf(false)
@@ -72,7 +75,7 @@ class MainRootState {
     var isPlayerSubMenuOpen by mutableStateOf(false)
     var isPlayerSceneSearchOpen by mutableStateOf(false)
 
-    // ★ 新規追加: アプリ内ミニプレイヤー（PiP）のフラグ
+    // アプリ内ミニプレイヤー（PiP）のフラグ
     var isMiniPlayerMode by mutableStateOf(false)
 
     // 履歴・復帰状態
@@ -108,7 +111,7 @@ class MainRootState {
         return true
     }
 
-    // ★ 修正: ミニプレイヤー中は「フルスクリーンではない」と判定させることで、背面のUIを生かす
+    // ミニプレイヤー中は「フルスクリーンではない」と判定させることで、背面のUIを生かす
     fun isFullScreen(
         channel: Channel?,
         program: RecordedProgram?,
