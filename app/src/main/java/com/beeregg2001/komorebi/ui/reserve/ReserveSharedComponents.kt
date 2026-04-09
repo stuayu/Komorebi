@@ -68,12 +68,9 @@ fun DayOfWeekSelectionDialog(
         4 to "木曜日", 5 to "金曜日", 6 to "土曜日"
     )
 
-    // ★修正: TvLazyColumn 自体ではなく、先頭アイテムの Surface に focusRequester を付ける
-    // TvLazyColumn は内部が独自実装で focusRequester を受け付けない
     val firstItemRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        // clearFocus(force=true) 後にフォーカスシステムが安定するまで待つ
         delay(150)
         runCatching { firstItemRequester.requestFocus() }
     }
@@ -109,7 +106,6 @@ fun DayOfWeekSelectionDialog(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 TvLazyColumn(
-                    // ★修正: TvLazyColumn への .focusRequester() を削除
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(dayOrder) { dayValue ->
@@ -128,7 +124,6 @@ fun DayOfWeekSelectionDialog(
                                 focusedContainerColor = colors.textPrimary,
                                 focusedContentColor = if (colors.isDark) Color.Black else Color.White
                             ),
-                            // ★修正: 先頭アイテムにだけ firstItemRequester を付ける
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .then(
@@ -192,6 +187,8 @@ fun NumberSelectionDialog(
     title: String,
     range: IntRange,
     initialValue: Int,
+    isHour: Boolean = false, // ★ 追加: 時刻を選択しているかのフラグ
+    timeFormat: String = "24H", // ★ 追加: フォーマット指定
     onConfirm: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -200,11 +197,9 @@ fun NumberSelectionDialog(
         initialFirstVisibleItemIndex = range.indexOf(initialValue).coerceAtLeast(0)
     )
 
-    // ★修正: 初期値アイテムの Surface に focusRequester を付ける
     val initialItemRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        // clearFocus(force=true) 後にフォーカスシステムが安定するまで待つ
         delay(150)
         runCatching { initialItemRequester.requestFocus() }
     }
@@ -250,10 +245,19 @@ fun NumberSelectionDialog(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                    // ★修正: TvLazyColumn への .focusRequester() を削除
                 ) {
                     items(range.toList()) { num ->
                         val isInitial = num == initialValue
+
+                        // ★ 修正: isHour と timeFormat に応じて表示テキストを生成
+                        val displayText = if (isHour && timeFormat == "12H") {
+                            val amPm = if (num < 12) "午前" else "午後"
+                            val h12 = if (num % 12 == 0) 12 else num % 12
+                            "$amPm $h12"
+                        } else {
+                            String.format("%02d", num)
+                        }
+
                         Surface(
                             onClick = { onConfirm(num) },
                             shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
@@ -264,7 +268,6 @@ fun NumberSelectionDialog(
                                 focusedContainerColor = colors.textPrimary,
                                 focusedContentColor = if (colors.isDark) Color.Black else Color.White
                             ),
-                            // ★修正: 初期値アイテムにだけ initialItemRequester を付ける
                             modifier = Modifier
                                 .width(120.dp)
                                 .then(
@@ -272,7 +275,7 @@ fun NumberSelectionDialog(
                                 )
                         ) {
                             Text(
-                                text = String.format("%02d", num),
+                                text = displayText,
                                 modifier = Modifier
                                     .padding(vertical = 12.dp)
                                     .fillMaxWidth(),

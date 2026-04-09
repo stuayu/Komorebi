@@ -25,7 +25,12 @@ import javax.inject.Singleton
 sealed class UpdateState {
     object Idle : UpdateState()
     object Checking : UpdateState()
-    data class UpdateAvailable(val versionName: String, val releaseNotes: String, val apkUrl: String) : UpdateState()
+    data class UpdateAvailable(
+        val versionName: String,
+        val releaseNotes: String,
+        val apkUrl: String
+    ) : UpdateState()
+
     data class Downloading(val progressPercentage: Int) : UpdateState()
     object ReadyToInstall : UpdateState()
     data class Error(val message: String) : UpdateState()
@@ -41,9 +46,11 @@ class AppUpdater @Inject constructor(
     private val client = OkHttpClient()
 
     // ★ご自身のGitHubのversion.jsonのRaw URLに書き換えてください
-    private val versionJsonUrl = "https://raw.githubusercontent.com/BeerEgg2001/Komorebi/main/version.json"
+    private val versionJsonUrl =
+        "https://raw.githubusercontent.com/BeerEgg2001/Komorebi/main/version.json"
 
-    suspend fun checkForUpdates() = withContext(Dispatchers.IO) {
+    // ★ 修正: 引数に receiveBetaUpdates フラグを追加し、デフォルトは false (Stable) とする
+    suspend fun checkForUpdates(receiveBetaUpdates: Boolean = false) = withContext(Dispatchers.IO) {
         _updateState.value = UpdateState.Checking
         try {
             val request = Request.Builder().url(versionJsonUrl).build()
@@ -51,17 +58,25 @@ class AppUpdater @Inject constructor(
 
             if (response.isSuccessful) {
                 val jsonString = response.body?.string() ?: return@withContext
-                val json = JSONObject(jsonString)
+                val rootJson = JSONObject(jsonString)
 
-                val latestVersionCode = json.getInt("versionCode")
-                val latestVersionName = json.getString("versionName")
-                val releaseNotes = json.getString("releaseNotes")
-                val apkUrl = json.getString("apkUrl")
+                // ★ 修正: ベータ版の受信が有効で、かつJSON内に "beta" オブジェクトが定義されていればそちらをパースする
+                val targetJson = if (receiveBetaUpdates && rootJson.has("beta")) {
+                    rootJson.getJSONObject("beta")
+                } else {
+                    rootJson
+                }
+
+                val latestVersionCode = targetJson.getInt("versionCode")
+                val latestVersionName = targetJson.getString("versionName")
+                val releaseNotes = targetJson.getString("releaseNotes")
+                val apkUrl = targetJson.getString("apkUrl")
 
                 val currentVersionCode = getCurrentVersionCode()
 
                 if (latestVersionCode > currentVersionCode) {
-                    _updateState.value = UpdateState.UpdateAvailable(latestVersionName, releaseNotes, apkUrl)
+                    _updateState.value =
+                        UpdateState.UpdateAvailable(latestVersionName, releaseNotes, apkUrl)
                 } else {
                     _updateState.value = UpdateState.Idle
                 }
@@ -121,7 +136,8 @@ class AppUpdater @Inject constructor(
 
         } catch (e: Exception) {
             Log.e("AppUpdater", "Download failed", e)
-            _updateState.value = UpdateState.Error("ダウンロード中にエラーが発生しました: ${e.localizedMessage}")
+            _updateState.value =
+                UpdateState.Error("ダウンロード中にエラーが発生しました: ${e.localizedMessage}")
         }
     }
 

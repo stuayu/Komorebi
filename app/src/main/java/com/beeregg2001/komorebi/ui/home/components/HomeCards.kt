@@ -31,6 +31,7 @@ import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun LastWatchedChannelCard(
@@ -39,7 +40,7 @@ fun LastWatchedChannelCard(
     logoUrl: String,
     onClick: () -> Unit,
     onFocus: () -> Unit,
-    modifier: Modifier = Modifier // 🌟 追加
+    modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
@@ -48,7 +49,7 @@ fun LastWatchedChannelCard(
 
     Surface(
         onClick = onClick,
-        modifier = modifier // 🌟 適用
+        modifier = modifier
             .width(220.dp)
             .height(96.dp)
             .onFocusChanged {
@@ -134,14 +135,14 @@ fun HotChannelCard(
     logoUrl: String,
     onClick: () -> Unit,
     onFocus: () -> Unit,
-    modifier: Modifier = Modifier // 🌟 追加
+    modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
 
     Surface(
         onClick = onClick,
-        modifier = modifier // 🌟 適用
+        modifier = modifier
             .width(260.dp)
             .height(106.dp)
             .onFocusChanged {
@@ -226,7 +227,7 @@ fun WatchHistoryCard(
     konomiPort: String,
     onClick: () -> Unit,
     onFocus: (progress: Float, thumbnailUrl: String) -> Unit,
-    modifier: Modifier = Modifier // 🌟 追加
+    modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
@@ -244,7 +245,7 @@ fun WatchHistoryCard(
 
     Surface(
         onClick = onClick,
-        modifier = modifier // 🌟 適用
+        modifier = modifier
             .width(260.dp)
             .height(146.dp)
             .onFocusChanged {
@@ -340,16 +341,28 @@ fun UpcomingReserveCard(
     reserve: ReserveItem,
     onClick: () -> Unit,
     onFocus: (startFormat: String) -> Unit,
-    modifier: Modifier = Modifier // 🌟 追加
+    modifier: Modifier = Modifier,
+    timeFormat: String // ★ 追加: 12H/24H フォーマット
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
     val start = OffsetDateTime.parse(reserve.program.startTime)
-    val startFormat = start.format(DateTimeFormatter.ofPattern("MM/dd HH:mm"))
+
+    // ★ 修正: timeFormat に応じた日付+時刻のフォーマット (HeroDashboard用)
+    val startFormat = remember(start, timeFormat) {
+        val pattern = if (timeFormat == "12H") "MM/dd a h:mm" else "MM/dd HH:mm"
+        start.format(DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE))
+    }
+
+    // ★ 修正: timeFormat に応じたカード上の時刻表示 (時間のみ)
+    val displayTime = remember(start, timeFormat) {
+        val pattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+        start.format(DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE))
+    }
 
     Surface(
         onClick = onClick,
-        modifier = modifier // 🌟 適用
+        modifier = modifier
             .width(240.dp)
             .height(106.dp)
             .onFocusChanged {
@@ -372,7 +385,7 @@ fun UpcomingReserveCard(
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    start.format(DateTimeFormatter.ofPattern("HH:mm")),
+                    text = displayTime, // ★ 修正
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textPrimary.copy(0.7f)
                 )
@@ -424,12 +437,18 @@ fun GenrePickupCard(
     timeSlot: String,
     onClick: () -> Unit,
     onFocus: (startFormat: String) -> Unit,
-    modifier: Modifier = Modifier // 🌟 追加
+    modifier: Modifier = Modifier,
+    timeFormat: String // ★ 追加
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val colors = KomorebiTheme.colors
     val start = OffsetDateTime.parse(program.start_time)
-    val startFormat = start.format(DateTimeFormatter.ofPattern("MM/dd HH:mm"))
+
+    // ★ 修正: timeFormat に応じた日付+時刻のフォーマット
+    val startFormat = remember(start, timeFormat) {
+        val pattern = if (timeFormat == "12H") "MM/dd a h:mm" else "MM/dd HH:mm"
+        start.format(DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE))
+    }
 
     val baseAlpha = if (isFocused) 1f else 0.6f
     val gradientStartColor = when (timeSlot) {
@@ -445,12 +464,12 @@ fun GenrePickupCard(
 
     Surface(
         onClick = onClick,
-        modifier = modifier // 🌟 適用
+        modifier = modifier
             .width(260.dp)
             .height(116.dp)
             .onFocusChanged {
                 isFocused = it.isFocused
-                if (it.isFocused) onFocus(startFormat)
+                if (it.isFocused) onFocus(startFormat) // ★ 修正されたフォーマットを渡す
             },
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
         colors = ClickableSurfaceDefaults.colors(

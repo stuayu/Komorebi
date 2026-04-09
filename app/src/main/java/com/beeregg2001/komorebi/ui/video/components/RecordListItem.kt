@@ -47,14 +47,15 @@ fun RecordListItem(
     konomiPort: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    isPersistentFocused: Boolean = false
+    isPersistentFocused: Boolean = false,
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
     var isFocused by remember { mutableStateOf(false) }
 
     val isCurrentlyRecording = program.isRecording || program.recordedVideo.status == "Recording"
 
-    // ★修正: 録画中は選択不可（非アクティブ）にするため、条件を「かつ録画中でないか」に変更
+    // 録画中は選択不可（非アクティブ）にするため、条件を「かつ録画中でないか」に変更
     val isAnalyzed = program.recordedVideo.hasKeyFrames && !isCurrentlyRecording
 
     val isVisualFocused = isFocused || isPersistentFocused
@@ -84,10 +85,12 @@ fun RecordListItem(
     val secondaryTextColor =
         if (isVisualFocused) inverseColor.copy(alpha = 0.8f) else colors.textSecondary
 
-    val displayDate = remember(program.startTime) {
+    // ★ 修正: timeFormat に応じて日付+時刻のフォーマットを動的に切り替える
+    val displayDate = remember(program.startTime, timeFormat) {
         try {
             val zdt = ZonedDateTime.parse(program.startTime)
-            val formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd(E) a h:mm", Locale.JAPANESE)
+            val pattern = if (timeFormat == "12H") "yyyy/MM/dd(E) a h:mm" else "yyyy/MM/dd(E) HH:mm"
+            val formatter = DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE)
             zdt.format(formatter)
         } catch (e: Exception) {
             program.startTime.take(16).replace("-", "/")

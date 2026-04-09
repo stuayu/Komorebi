@@ -31,7 +31,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.*
@@ -40,6 +44,7 @@ import com.beeregg2001.komorebi.ui.main.AiFocusTicketManager
 import com.beeregg2001.komorebi.common.safeRequestFocusWithRetry
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import com.beeregg2001.komorebi.viewmodel.ChatMessage
+import com.google.common.io.Files.append
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -267,12 +272,17 @@ fun AiConciergePanel(
                                                 )
                                             }
                                         } else {
-                                            if (msg.isUser) Text(
-                                                msg.text,
-                                                color = colors.textPrimary,
-                                                fontSize = 14.sp
-                                            )
-                                            else TypingText(msg.text, scrollState)
+                                            if (msg.isUser) {
+                                                Text(
+                                                    msg.text,
+                                                    color = colors.textPrimary,
+                                                    fontSize = 14.sp
+                                                )
+                                            } else {
+                                                // ★ 修正: 解析済みの装飾テキストをタイピング表示する
+                                                val parsedText = parseSimpleMarkdown(msg.text)
+                                                TypingAnnotatedText(parsedText, scrollState)
+                                            }
                                         }
                                     }
                                 }
@@ -466,6 +476,63 @@ fun TypingText(text: String, scrollState: ScrollState, onTypingFinished: () -> U
     }
     Text(
         text = displayedText,
+        color = KomorebiTheme.colors.textPrimary,
+        fontSize = 14.sp,
+        lineHeight = 22.sp
+    )
+}
+
+// ★ 追加1: AIの回答から「太字」と「箇条書き」を解析する専用関数
+@Composable
+fun parseSimpleMarkdown(text: String): AnnotatedString {
+    val colors = KomorebiTheme.colors
+
+    // 1. 箇条書きのハイフンやアスタリスクを、見栄えの良い中黒(•)に変換
+    val listProcessed = text.replace(Regex("(?m)^[\\*\\-]\\s+"), "• ")
+
+    // 2. 太字(**text**)を抽出し、色と太さを適用したAnnotatedStringを生成
+    return buildAnnotatedString {
+        val boldRegex = Regex("\\*\\*(.*?)\\*\\*")
+        var lastIndex = 0
+
+        boldRegex.findAll(listProcessed).forEach { matchResult ->
+            // 太字の前の通常テキストを追加
+            append(listProcessed.substring(lastIndex, matchResult.range.first))
+
+            // 太字テキストに装飾（テーマのアクセントカラー＋太字）を適用して追加
+            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold, color = colors.accent)) {
+                append(matchResult.groupValues[1])
+            }
+            lastIndex = matchResult.range.last + 1
+        }
+        // 残りの通常テキストを追加
+        append(listProcessed.substring(lastIndex))
+    }
+}
+
+// ★ 追加2: 装飾付き文字列を1文字ずつタイピング表示するコンポーネント
+@Composable
+fun TypingAnnotatedText(
+    annotatedString: AnnotatedString,
+    scrollState: ScrollState,
+    onTypingFinished: () -> Unit = {}
+) {
+    // 現在何文字目まで表示するかを保持
+    var length by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(annotatedString) {
+        length = 0
+        for (i in 0..annotatedString.length) {
+            length = i
+            delay(15) // タイピング速度（お好みで調整してください）
+            scrollState.scrollTo(scrollState.maxValue)
+        }
+        onTypingFinished()
+    }
+
+    Text(
+        // 装飾を保ったまま、0文字目〜length文字目までを切り出して表示
+        text = annotatedString.subSequence(0, length),
         color = KomorebiTheme.colors.textPrimary,
         fontSize = 14.sp,
         lineHeight = 22.sp

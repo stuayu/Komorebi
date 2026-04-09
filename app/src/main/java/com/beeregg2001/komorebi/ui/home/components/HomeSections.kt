@@ -173,7 +173,6 @@ fun LastWatchedSection(
                                 contentFirstItemRequester
                             ) else Modifier
                         )
-                        // 🌟 追加: 左右端でのフォーカス抜け（迷子や設定ボタンへの誤爆）を完全にブロック
                         .focusProperties {
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == channels.size - 1) right = FocusRequester.Cancel
@@ -267,7 +266,6 @@ fun HotChannelSection(
                                 contentFirstItemRequester
                             ) else Modifier
                         )
-                        // 🌟 追加: 左右端のブロック
                         .focusProperties {
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == hotChannels.size - 1) right = FocusRequester.Cancel
@@ -360,7 +358,6 @@ fun WatchHistorySection(
                                 contentFirstItemRequester
                             ) else Modifier
                         )
-                        // 🌟 追加: 左右端のブロック
                         .focusProperties {
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == watchHistory.size - 1) right = FocusRequester.Cancel
@@ -389,7 +386,8 @@ fun UpcomingReserveSection(
     onUpdateHeroInfo: (HomeHeroInfo) -> Unit,
     ticketManager: HomeFocusTicketManager,
     homeViewModel: HomeViewModel,
-    sectionId: String
+    sectionId: String,
+    timeFormat: String // ★ 追加
 ) {
     val rowState = rememberTvLazyListState()
 
@@ -453,7 +451,6 @@ fun UpcomingReserveSection(
                                 contentFirstItemRequester
                             ) else Modifier
                         )
-                        // 🌟 追加: 左右端のブロック
                         .focusProperties {
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == upcomingReserves.size - 1) right = FocusRequester.Cancel
@@ -463,7 +460,8 @@ fun UpcomingReserveSection(
                                 homeViewModel.lastClickedSection = sectionId
                                 homeViewModel.lastClickedItemId = reserve.id.toString()
                             }
-                        }
+                        },
+                    timeFormat = timeFormat // ★ 追加
                 )
             }
         }
@@ -488,7 +486,8 @@ fun GenrePickupSection(
     onUpdateHeroInfo: (HomeHeroInfo) -> Unit,
     ticketManager: HomeFocusTicketManager,
     homeViewModel: HomeViewModel,
-    sectionId: String
+    sectionId: String,
+    timeFormat: String // ★ 追加
 ) {
     val rowState = rememberTvLazyListState()
 
@@ -558,7 +557,6 @@ fun GenrePickupSection(
                                 contentFirstItemRequester
                             ) else Modifier
                         )
-                        // 🌟 追加: 左右端のブロック
                         .focusProperties {
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == genrePickup.size - 1) right = FocusRequester.Cancel
@@ -568,7 +566,8 @@ fun GenrePickupSection(
                                 homeViewModel.lastClickedSection = sectionId
                                 homeViewModel.lastClickedItemId = program.id
                             }
-                        }
+                        },
+                    timeFormat = timeFormat // ★ 追加
                 )
             }
         }

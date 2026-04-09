@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator // ★追加
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,7 +42,8 @@ fun RecordDetailPanel(
     konomiPort: String,
     focusRequester: FocusRequester,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    timeFormat: String = "24H" // ★ 追加
 ) {
     val colors = KomorebiTheme.colors
     val scrollState = rememberScrollState()
@@ -52,10 +53,12 @@ fun RecordDetailPanel(
 
     val thumbnailUrl = UrlBuilder.getThumbnailUrl(konomiIp, konomiPort, program.id.toString())
 
-    val displayDate = remember(program.startTime) {
+    // ★ 修正: timeFormat に応じて日付+時刻のフォーマットを動的に切り替える
+    val displayDate = remember(program.startTime, timeFormat) {
         try {
             val zdt = ZonedDateTime.parse(program.startTime)
-            val formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd(E) a h:mm", Locale.JAPANESE)
+            val pattern = if (timeFormat == "12H") "yyyy/MM/dd(E) a h:mm" else "yyyy/MM/dd(E) HH:mm"
+            val formatter = DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE)
             zdt.format(formatter)
         } catch (e: Exception) {
             program.startTime.take(16).replace("-", "/")
@@ -145,7 +148,6 @@ fun RecordDetailPanel(
             )
             Spacer(modifier = Modifier.height(4.dp))
 
-            // ★修正: descriptionが空の場合のフォールバック表示
             val descText = program.description.takeIf { it.isNotEmpty() } ?: "番組概要がありません"
             Text(
                 text = descText,
@@ -154,7 +156,6 @@ fun RecordDetailPanel(
                 fontSize = 13.sp
             )
 
-            // API通信等でdetailを取得できた場合のみ表示
             if (!program.detail.isNullOrEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
                 program.detail.forEach { (key, value) ->
@@ -174,7 +175,6 @@ fun RecordDetailPanel(
                     )
                 }
             } else if (program.description.isEmpty()) {
-                // descriptionもdetailも無い場合（APIからのデータ取得中など）
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

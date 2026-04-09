@@ -145,6 +145,10 @@ class SettingsViewModel @Inject constructor(
     val appTheme: StateFlow<String> = settingsRepository.appTheme
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "MONOTONE")
 
+    // ★ 追加: ベータ版を受け取るかどうかの状態
+    val receiveBetaUpdates: StateFlow<Boolean> = settingsRepository.receiveBetaUpdates
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     val isSettingsInitialized: StateFlow<Boolean> = settingsRepository.isInitialized
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 

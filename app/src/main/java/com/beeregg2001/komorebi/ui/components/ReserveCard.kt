@@ -30,7 +30,7 @@ import androidx.tv.material3.*
 import coil.compose.AsyncImage
 import com.beeregg2001.komorebi.common.UrlBuilder
 import com.beeregg2001.komorebi.data.model.ReserveItem
-import com.beeregg2001.komorebi.ui.theme.KomorebiTheme // ★追加
+import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -45,21 +45,26 @@ fun ReserveCard(
     konomiIp: String,
     konomiPort: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    timeFormat: String = "24H" // ★追加: 12H/24H フォーマットを受け取る（他のタブでエラーにならないようデフォルト値設定）
 ) {
-    val colors = KomorebiTheme.colors // ★追加
+    val colors = KomorebiTheme.colors
     var isFocused by remember { mutableStateOf(false) }
 
     val program = item.program
     val settings = item.recordSettings
 
     // --- 配色定義 (テーマベース) ---
-    val contentColor = if (isFocused) (if(colors.isDark) Color.Black else Color.White) else colors.textPrimary // ★修正
-    val subTextColor = if (isFocused) (if(colors.isDark) Color.DarkGray else Color.LightGray) else colors.textSecondary // ★修正
+    val contentColor =
+        if (isFocused) (if (colors.isDark) Color.Black else Color.White) else colors.textPrimary
+    val subTextColor =
+        if (isFocused) (if (colors.isDark) Color.DarkGray else Color.LightGray) else colors.textSecondary
 
     // バッジ類
-    val badgeBgColor = if (isFocused) (if(colors.isDark) Color.Black else Color.White) else colors.textPrimary // ★修正
-    val badgeTextColor = if (isFocused) (if(colors.isDark) Color.White else Color.Black) else colors.background // ★修正
+    val badgeBgColor =
+        if (isFocused) (if (colors.isDark) Color.Black else Color.White) else colors.textPrimary
+    val badgeTextColor =
+        if (isFocused) (if (colors.isDark) Color.White else Color.Black) else colors.background
 
     // ステータスカラー定義
     val recordingRed = Color(0xFFE53935)
@@ -73,19 +78,35 @@ fun ReserveCard(
     val (statusText, statusColor, statusIcon) = when {
         isRecording -> Triple("録画中", recordingRed, null)
         item.recordingAvailability == "Full" -> Triple("録画可能", normalGreen, Icons.Default.Check)
-        item.recordingAvailability == "Partial" -> Triple("一部のみ録画", warningYellow, Icons.Default.Warning)
-        item.recordingAvailability == "None" || item.recordingAvailability.equals("unavailable", ignoreCase = true) ->
+        item.recordingAvailability == "Partial" -> Triple(
+            "一部のみ録画",
+            warningYellow,
+            Icons.Default.Warning
+        )
+
+        item.recordingAvailability == "None" || item.recordingAvailability.equals(
+            "unavailable",
+            ignoreCase = true
+        ) ->
             Triple("録画重複", errorRed, Icons.Default.Warning)
+
         else -> Triple(item.recordingAvailability, warningYellow, Icons.Default.Warning)
     }
 
-    // 時刻フォーマット
-    val timeInfo = remember(program.startTime, program.endTime) {
+    // ★修正: 時刻フォーマットを timeFormat に応じて分岐
+    val timeInfo = remember(program.startTime, program.endTime, timeFormat) {
         try {
-            val start = OffsetDateTime.parse(program.startTime).atZoneSameInstant(ZoneId.systemDefault())
-            val end = OffsetDateTime.parse(program.endTime).atZoneSameInstant(ZoneId.systemDefault())
-            val dateFmt = DateTimeFormatter.ofPattern("yyyy/MM/dd (E) HH:mm", Locale.JAPAN)
-            val endFmt = DateTimeFormatter.ofPattern("HH:mm")
+            val start =
+                OffsetDateTime.parse(program.startTime).atZoneSameInstant(ZoneId.systemDefault())
+            val end =
+                OffsetDateTime.parse(program.endTime).atZoneSameInstant(ZoneId.systemDefault())
+
+            val datePattern =
+                if (timeFormat == "12H") "yyyy/MM/dd (E) a h:mm" else "yyyy/MM/dd (E) HH:mm"
+            val endPattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+
+            val dateFmt = DateTimeFormatter.ofPattern(datePattern, Locale.JAPANESE)
+            val endFmt = DateTimeFormatter.ofPattern(endPattern, Locale.JAPANESE)
             val durationMin = ChronoUnit.MINUTES.between(start, end)
             "${start.format(dateFmt)} ~ ${end.format(endFmt)} (${durationMin}分)"
         } catch (e: Exception) {
@@ -99,7 +120,11 @@ fun ReserveCard(
     }
 
     val logoUrl = remember(item.channel) {
-        UrlBuilder.getKonomiTvLogoUrl(konomiIp, konomiPort, item.channel.displayChannelId ?: item.channel.id)
+        UrlBuilder.getKonomiTvLogoUrl(
+            konomiIp,
+            konomiPort,
+            item.channel.displayChannelId ?: item.channel.id
+        )
     }
 
     Surface(
@@ -111,56 +136,157 @@ fun ReserveCard(
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = colors.surface, // ★修正: Color(0xFF202020)
-            focusedContainerColor = colors.textPrimary, // ★修正: Color.White
+            containerColor = colors.surface,
+            focusedContainerColor = colors.textPrimary,
             contentColor = colors.textPrimary,
-            focusedContentColor = if(colors.isDark) Color.Black else Color.White // ★修正
+            focusedContentColor = if (colors.isDark) Color.Black else Color.White
         ),
         border = ClickableSurfaceDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(2.dp, colors.accent), // ★修正: Color.White -> colors.accent
+                border = BorderStroke(2.dp, colors.accent),
                 shape = RoundedCornerShape(8.dp)
             )
         )
     ) {
-        Row(modifier = Modifier.fillMaxSize().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(60.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.width(60.dp)
+            ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Box(modifier = Modifier.size(24.dp).background(badgeBgColor, CircleShape))
-                    Text(text = settings.priority.toString(), style = MaterialTheme.typography.labelSmall, color = badgeTextColor, fontWeight = FontWeight.Bold)
+                    Box(modifier = Modifier
+                        .size(24.dp)
+                        .background(badgeBgColor, CircleShape))
+                    Text(
+                        text = settings.priority.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = badgeTextColor,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-                Text("優先度", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = subTextColor)
+                Text(
+                    "優先度",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp,
+                    color = subTextColor
+                )
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = program.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).then(if (isFocused) Modifier.basicMarquee(iterations = Int.MAX_VALUE, velocity = 40.dp) else Modifier))
+                    Text(
+                        text = program.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = contentColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .then(
+                                if (isFocused) Modifier.basicMarquee(
+                                    iterations = Int.MAX_VALUE,
+                                    velocity = 40.dp
+                                ) else Modifier
+                            )
+                    )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    AsyncImage(model = logoUrl, contentDescription = null, modifier = Modifier.width(48.dp).aspectRatio(16f / 9f).clipToBounds().background(if (isFocused) Color.Transparent else colors.textPrimary.copy(0.1f), RoundedCornerShape(2.dp)), contentScale = ContentScale.Crop) // ★修正
+                    AsyncImage(
+                        model = logoUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .width(48.dp)
+                            .aspectRatio(16f / 9f)
+                            .clipToBounds()
+                            .background(
+                                if (isFocused) Color.Transparent else colors.textPrimary.copy(0.1f),
+                                RoundedCornerShape(2.dp)
+                            ),
+                        contentScale = ContentScale.Crop
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "${item.channel.channelNumber} ${item.channel.name}", style = MaterialTheme.typography.bodySmall, color = subTextColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        text = "${item.channel.channelNumber} ${item.channel.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = subTextColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(text = program.description ?: "", style = MaterialTheme.typography.bodySmall, color = subTextColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = program.description ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = subTextColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
             Spacer(modifier = Modifier.width(16.dp))
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxHeight()) {
-                Box(modifier = Modifier.border(1.dp, if (isFocused && statusColor == normalGreen) (if(colors.isDark) Color.Black else Color.White) else statusColor, RoundedCornerShape(16.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) { // ★修正
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxHeight()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .border(
+                            1.dp,
+                            if (isFocused && statusColor == normalGreen) (if (colors.isDark) Color.Black else Color.White) else statusColor,
+                            RoundedCornerShape(16.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isRecording) { Box(modifier = Modifier.size(10.dp).background(statusColor, CircleShape)) }
-                        else if (statusIcon != null) { Icon(imageVector = statusIcon, contentDescription = null, tint = statusColor, modifier = Modifier.size(12.dp)) }
+                        if (isRecording) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(statusColor, CircleShape)
+                            )
+                        } else if (statusIcon != null) {
+                            Icon(
+                                imageVector = statusIcon,
+                                contentDescription = null,
+                                tint = statusColor,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = statusText, color = statusColor, style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            text = statusText,
+                            color = statusColor,
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                Text(text = timeInfo, style = MaterialTheme.typography.bodyMedium, color = contentColor, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = timeInfo,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = contentColor,
+                    fontWeight = FontWeight.SemiBold
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Storage, null, tint = subTextColor, modifier = Modifier.size(12.dp))
+                    Icon(
+                        Icons.Default.Storage,
+                        null,
+                        tint = subTextColor,
+                        modifier = Modifier.size(12.dp)
+                    )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = fileSizeInfo, style = MaterialTheme.typography.labelSmall, color = subTextColor)
+                    Text(
+                        text = fileSizeInfo,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = subTextColor
+                    )
                 }
             }
         }

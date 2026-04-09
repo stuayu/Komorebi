@@ -27,6 +27,10 @@ class VideoPlayerState(
     var isCommentEnabled by mutableStateOf(true)
     var isSubtitleEnabled by mutableStateOf(false)
 
+    // ★ 追加: 戻るキー長押し判定用
+    var backKeyDownTime by mutableLongStateOf(0L)
+    var isBackKeyLongPressed by mutableStateOf(false)
+
     fun updateIndicator(icon: ImageVector, label: String) {
         indicatorState = IndicatorState(icon, label)
     }

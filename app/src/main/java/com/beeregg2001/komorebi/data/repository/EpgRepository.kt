@@ -24,7 +24,7 @@ import retrofit2.http.GET
 import retrofit2.http.Query
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.text.Normalizer // ★追加: 表記揺れ吸収のための正規化ライブラリ
+import java.text.Normalizer
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
@@ -71,20 +71,11 @@ class EpgRepository @Inject constructor(
         }
     }
 
-    // ==========================================
-    // ★追加: 曖昧検索（表記揺れ吸収）のための正規化ツール
-    // ==========================================
     private fun normalizeForSearch(text: String): String {
-        // NFKC正規化により、全角英数字→半角、半角カナ→全角、全角スペース→半角スペース等に統一
         val normalized = Normalizer.normalize(text, Normalizer.Form.NFKC)
-        // 大文字・小文字を区別せずに検索できるよう、すべて小文字に変換
         return normalized.lowercase()
     }
-    // ==========================================
 
-    // ==========================================
-    // ★ 修正: 将来の「詳細検索UI」にも完全対応する最強の検索エンジン
-    // ==========================================
     @RequiresApi(Build.VERSION_CODES.O)
     fun searchFuturePrograms(
         query: String = "",
@@ -93,10 +84,13 @@ class EpgRepository @Inject constructor(
         isLiveOnly: Boolean = false,
         channelName: String? = null
     ): List<EpgSearchResultItem> {
-        val normalizedQuery = normalizeForSearch(query)
-        val keywords = normalizedQuery.split(Regex("[\\s]+")).filter { it.isNotBlank() }
 
-        // 全ての条件が空の場合は、処理をスキップして空リストを返す（負荷対策）
+        // ★ 修正: カンマ区切りならOR検索、空白のみならAND検索とするハイブリッド解析
+        val isOrSearch = query.contains(",") || query.contains("、")
+        val delimiters = if (isOrSearch) Regex("[,、]+") else Regex("[\\s]+")
+        val keywords =
+            query.split(delimiters).map { normalizeForSearch(it.trim()) }.filter { it.isNotBlank() }
+
         if (keywords.isEmpty() && genre.isNullOrBlank() && dateStr.isNullOrBlank() && channelName.isNullOrBlank() && !isLiveOnly) {
             return emptyList()
         }
@@ -104,7 +98,6 @@ class EpgRepository @Inject constructor(
         val results = mutableListOf<EpgSearchResultItem>()
         val nowMs = System.currentTimeMillis()
 
-        // 日付のパース
         val targetTvDate = try {
             dateStr?.takeIf { it.isNotBlank() }?.let {
                 java.time.LocalDate.parse(it.replace("/", "-"))
@@ -114,13 +107,12 @@ class EpgRepository @Inject constructor(
         }
 
         memoryCache.values.flatten().forEach { wrapper ->
-            // 1. チャンネルフィルター (部分一致)
             if (!channelName.isNullOrBlank() && !wrapper.channel.name.contains(
                     channelName,
                     ignoreCase = true
                 )
             ) {
-                return@forEach // チャンネル名が一致しなければスキップ
+                return@forEach
             }
 
             wrapper.programs.forEach { prog ->
@@ -129,7 +121,6 @@ class EpgRepository @Inject constructor(
                         OffsetDateTime.parse(prog.start_time).toInstant().toEpochMilli()
                     if (startTimeMs > nowMs) {
 
-                        // 2. 日付フィルター (テレビ的1日: 朝4時区切り)
                         if (targetTvDate != null) {
                             val startDt = OffsetDateTime.parse(prog.start_time)
                             val base = startDt.withHour(4).withMinute(0).withSecond(0).withNano(0)
@@ -138,7 +129,6 @@ class EpgRepository @Inject constructor(
                             if (tvDate != targetTvDate) return@forEach
                         }
 
-                        // 3. ジャンルフィルター
                         if (!genre.isNullOrBlank()) {
                             val matchGenre = (prog.genres?.any {
                                 it.major.contains(genre) || it.middle.contains(genre)
@@ -146,7 +136,6 @@ class EpgRepository @Inject constructor(
                             if (!matchGenre) return@forEach
                         }
 
-                        // 4. 生放送フィルター
                         if (isLiveOnly) {
                             val detailText =
                                 prog.detail?.entries?.joinToString(" ") { "${it.key} ${it.value}" }
@@ -163,16 +152,20 @@ class EpgRepository @Inject constructor(
                             if (!matchLive) return@forEach
                         }
 
-                        // 5. キーワードフィルター (AND検索)
                         if (keywords.isNotEmpty()) {
                             val detailText =
                                 prog.detail?.entries?.joinToString(" ") { "${it.key} ${it.value}" }
                                     ?: ""
-                            // ★ チャンネル名も検索対象に含めることで柔軟性アップ
                             val combinedDesc =
                                 "${wrapper.channel.name} ${prog.title} ${prog.description} $detailText"
                             val normalizedDesc = normalizeForSearch(combinedDesc)
-                            val isMatch = keywords.all { k -> normalizedDesc.contains(k) }
+
+                            // ★ 修正: フラグに応じて AND と OR を使い分ける
+                            val isMatch = if (isOrSearch) {
+                                keywords.any { k -> normalizedDesc.contains(k) }
+                            } else {
+                                keywords.all { k -> normalizedDesc.contains(k) }
+                            }
                             if (!isMatch) return@forEach
                         }
 
@@ -183,7 +176,6 @@ class EpgRepository @Inject constructor(
             }
         }
 
-        // 時間順にソートして返す
         return results.sortedBy {
             try {
                 OffsetDateTime.parse(it.program.start_time).toInstant().toEpochMilli()

@@ -2,6 +2,7 @@ package com.beeregg2001.komorebi.data
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -61,6 +62,9 @@ class SettingsRepository @Inject constructor(
 
         // ★ 追加: 時間表記フォーマット (12H or 24H)
         val TIME_FORMAT = stringPreferencesKey("time_format")
+
+        // ★ 追加: ベータ版アップデート受信設定のキー
+        val RECEIVE_BETA_UPDATES = booleanPreferencesKey("receive_beta_updates")
     }
 
     val konomiIp: Flow<String> = context.dataStore.data.map { it[KONOMI_IP] ?: "" }
@@ -123,6 +127,9 @@ class SettingsRepository @Inject constructor(
     // ★ 追加: デフォルトは24時間表記(24H)
     val timeFormat: Flow<String> = context.dataStore.data.map { it[TIME_FORMAT] ?: "24H" }
 
+    // ★ 追加: ベータ版を受け取るかどうかのFlow
+    val receiveBetaUpdates: Flow<Boolean> = context.dataStore.data.map { it[RECEIVE_BETA_UPDATES] ?: false }
+
     val isInitialized: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs.contains(KONOMI_IP) || prefs.contains(MIRAKURUN_IP)
     }
@@ -153,5 +160,15 @@ class SettingsRepository @Inject constructor(
     suspend fun getStartupTabOnce(): String {
         val prefs = context.dataStore.data.first()
         return prefs[STARTUP_TAB] ?: "ホーム"
+    }
+
+    // ★ 追加: Boolean値(ON/OFF)をDataStoreに保存するメソッド
+    suspend fun saveBoolean(
+        key: androidx.datastore.preferences.core.Preferences.Key<Boolean>,
+        value: Boolean
+    ) {
+        context.dataStore.edit { settings ->
+            settings[key] = value
+        }
     }
 }

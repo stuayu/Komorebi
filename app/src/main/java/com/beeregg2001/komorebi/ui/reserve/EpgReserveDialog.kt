@@ -47,7 +47,8 @@ fun EpgReserveDialog(
         isFuzzySearch: Boolean, duplicateScope: String, priority: Int,
         isEventRelay: Boolean, isExactRecord: Boolean
     ) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
     var keyword by remember { mutableStateOf(initialKeyword) }
@@ -99,6 +100,17 @@ fun EpgReserveDialog(
         "毎週(${sortedDays.joinToString("・") { dayStrings[it] }})"
     }
 
+    // ★ 追加: 「時」のボタン用テキストを生成するラムダ
+    val formatHour: (Int) -> String = { hour ->
+        if (timeFormat == "12H") {
+            val amPm = if (hour < 12) "午前" else "午後"
+            val h12 = if (hour % 12 == 0) 12 else hour % 12
+            "$amPm $h12"
+        } else {
+            String.format("%02d", hour)
+        }
+    }
+
     LaunchedEffect(Unit) {
         delay(50)
         runCatching { firstItemFocusRequester.requestFocus() }
@@ -135,7 +147,6 @@ fun EpgReserveDialog(
                     if (isEditingKeyword) {
                         isEditingKeyword = false
                         keyboardController?.hide()
-                        // 修正: UIの再構築を待ってからフォーカスを当てる
                         scope.launch {
                             delay(50)
                             runCatching { firstItemFocusRequester.requestFocus() }
@@ -218,7 +229,6 @@ fun EpgReserveDialog(
                                 onDone = {
                                     isEditingKeyword = false
                                     keyboardController?.hide()
-                                    // 修正: UIの再構築を待ってからフォーカスを当てる
                                     scope.launch {
                                         delay(50)
                                         runCatching { firstItemFocusRequester.requestFocus() }
@@ -244,7 +254,7 @@ fun EpgReserveDialog(
                                 .height(56.dp)
                                 .focusRequester(firstItemFocusRequester),
                             shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(4.dp)),
-                            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f), // 少しだけ浮き上がらせる
+                            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
                             colors = ClickableSurfaceDefaults.colors(
                                 containerColor = colors.textPrimary.copy(alpha = 0.05f),
                                 contentColor = colors.textPrimary,
@@ -299,7 +309,7 @@ fun EpgReserveDialog(
                         Spacer(modifier = Modifier.width(16.dp))
 
                         TimeSelectButton(
-                            text = String.format("%02d", startHour),
+                            text = formatHour(startHour), // ★ 修正: 時刻フォーマットを適用
                             modifier = Modifier.focusRequester(startHourBtnRequester)
                         ) { numberSelectTarget = NumberSelectType.START_HOUR }
                         Text(
@@ -319,7 +329,7 @@ fun EpgReserveDialog(
                             modifier = Modifier.padding(horizontal = 4.dp)
                         )
                         TimeSelectButton(
-                            text = String.format("%02d", endHour),
+                            text = formatHour(endHour), // ★ 修正: 時刻フォーマットを適用
                             modifier = Modifier.focusRequester(endHourBtnRequester)
                         ) { numberSelectTarget = NumberSelectType.END_HOUR }
                         Text(
@@ -450,10 +460,16 @@ fun EpgReserveDialog(
                 NumberSelectType.END_MINUTE -> endMinute
                 else -> 0
             }
+
+            // ★ 修正: 何の項目を選択しているかの判定フラグとフォーマットを渡す
+            val isHourTarget =
+                numberSelectTarget == NumberSelectType.START_HOUR || numberSelectTarget == NumberSelectType.END_HOUR
             NumberSelectionDialog(
                 title = if (range.last == 23) "時を選択" else "分を選択",
                 range = range,
                 initialValue = initVal,
+                isHour = isHourTarget,
+                timeFormat = timeFormat,
                 onConfirm = { selected ->
                     val target = numberSelectTarget!!
                     when (target) {

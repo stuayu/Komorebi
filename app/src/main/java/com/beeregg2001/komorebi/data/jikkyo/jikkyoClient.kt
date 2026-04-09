@@ -36,11 +36,19 @@ class JikkyoClient(
 
     fun stop() {
         job?.cancel()
-        watchSocket?.close(1000, "Client stopped")
-        commentSocket?.close(1000, "Client stopped")
+        scope.cancel()
+
+        // ★ 修正1: コールバックを無効化し、遅れて届いたゾンビメッセージをUIに反映させない
+        onCommentReceived = null
+
+        // ★ 修正2: close (1000) による丁寧な切断ではなく、cancel() で即座に強制切断する
+        watchSocket?.cancel()
+        commentSocket?.cancel()
         watchSocket = null
         commentSocket = null
-        scope.cancel()
+
+        // ★ 修正3: OkHttpのバックグラウンドスレッドを確実に終了させ、メモリ/スレッドリークを防ぐ
+        client.dispatcher.executorService.shutdown()
     }
 
     private fun connect() {
