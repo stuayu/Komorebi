@@ -169,6 +169,9 @@ fun RecordListScreen(
     var focusedSeries by remember { mutableStateOf<SeriesInfo?>(null) }
     var savedFocusProgramId by remember { mutableStateOf<Int?>(null) }
 
+    // ★ 追加: フォーカスが外れても「最後に見ていたID」を保持し続ける変数
+    var lastKnownFocusedId by remember { mutableStateOf<Int?>(null) }
+
     val paneTransitionState =
         remember { MutableTransitionState(false) }.apply { targetState = menuState.isPaneOpen }
 
@@ -272,26 +275,18 @@ fun RecordListScreen(
     val currentTicket = ticketManager.currentTicket
     val issueTime = ticketManager.issueTime
 
-    // ★ 修正(Step3): AIコンシェルジュから戻ってきた時のフォーカス復元（チケット発行）
+    // ★ 修正: AIコンシェルジュから戻ってきた時のフォーカス復元（チケット発行）
     LaunchedEffect(aiFocusReturnTick) {
         if (aiFocusReturnTick > 0) {
-            // 1. ホームタブのアプローチ1と同様に、ウィンドウフォーカス復帰やON_RESUMEのリスト更新が落ち着くまで十分待つ
+            // Android TVのフォーカス復帰ラグを考慮し、少し長めに待つ
             delay(400)
 
-            // 2. 現在のカテゴリに応じて、復帰対象のIDを適切に取得する
-            val targetId = if (selectedCategory == RecordCategory.SERIES) {
-                focusedSeries?.representativeVideoId
-            } else {
-                focusedProgram?.id
-            }
-
-            // 3. チケット発行
-            if (targetId != null) {
-                ticketManager.issue(FocusTicket.TARGET_ID, targetId)
+            // 記憶しておいたIDを使ってチケット発行
+            if (lastKnownFocusedId != null) {
+                ticketManager.issue(FocusTicket.TARGET_ID, lastKnownFocusedId)
             } else {
                 ticketManager.issue(FocusTicket.LIST_TOP)
             }
-
             onAiReturnConsumed()
         }
     }
@@ -344,6 +339,7 @@ fun RecordListScreen(
         savedFocusProgramId = null
         focusedProgram = null
         focusedSeries = null
+        lastKnownFocusedId = null // ★ 追加
         viewModel.searchRecordings(query)
         menuState.isSearchBarVisible = false; menuState.isDetailActive = false
         ticketManager.issue(FocusTicket.LIST_TOP)
@@ -355,6 +351,7 @@ fun RecordListScreen(
         savedFocusProgramId = null
         focusedProgram = null
         focusedSeries = null
+        lastKnownFocusedId = null // ★ 追加
 
         if (isSameCategory) {
             when (category) {
@@ -521,7 +518,10 @@ fun RecordListScreen(
                                     onBackPress = handleBackPress,
                                     listState = seriesListState,
                                     ticketManager = ticketManager,
-                                    onFocusedSeriesChanged = { focusedSeries = it }
+                                    onFocusedSeriesChanged = {
+                                        focusedSeries = it
+                                        if (it != null) lastKnownFocusedId = it.representativeVideoId // ★ 追加
+                                    }
                                 )
                             }
 
@@ -553,7 +553,10 @@ fun RecordListScreen(
                                     fetchedProgramDetail = programDetail,
                                     onFetchDetail = { viewModel.fetchProgramDetail(it) },
                                     onClearDetail = { viewModel.clearProgramDetail() },
-                                    onFocusedItemChanged = { focusedProgram = it },
+                                    onFocusedItemChanged = {
+                                        focusedProgram = it
+                                        if (it != null) lastKnownFocusedId = it.id // ★ 追加
+                                    },
                                     onOpenNavPane = handleOpenNavPane,
                                     onTopBarDownRequesterChanged = {
                                         listContentDownRequester = it
@@ -584,7 +587,10 @@ fun RecordListScreen(
                                     onBackPress = handleBackPress,
                                     gridState = gridState,
                                     ticketManager = ticketManager,
-                                    onFocusedSeriesChanged = { focusedSeries = it }
+                                    onFocusedSeriesChanged = {
+                                        focusedSeries = it
+                                        if (it != null) lastKnownFocusedId = it.representativeVideoId // ★ 追加
+                                    }
                                 )
                             }
 
@@ -603,7 +609,10 @@ fun RecordListScreen(
                                     onProgramClick = onProgramClick,
                                     onOpenNavPane = handleOpenNavPane,
                                     ticketManager = ticketManager,
-                                    onFocusedItemChanged = { focusedProgram = it }
+                                    onFocusedItemChanged = {
+                                        focusedProgram = it
+                                        if (it != null) lastKnownFocusedId = it.id // ★ 追加
+                                    }
                                 )
                             }
                         }

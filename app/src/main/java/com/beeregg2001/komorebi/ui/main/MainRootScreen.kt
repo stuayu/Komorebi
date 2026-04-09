@@ -651,7 +651,10 @@ fun MainRootScreen(
                                         autoReserveKeywords = autoReserveKeywords,
                                         onAutoReserveClick = { program ->
                                             state.selectedProgramForAutoReserve = program
-                                        }
+                                        },
+                                        // ★ 追加: AIコンシェルジュ復帰シグナルを渡す
+                                        aiFocusReturnTick = state.aiFocusReturnTick,
+                                        onAiReturnConsumed = { state.aiFocusReturnTick = 0 }
                                     )
                                 }
 
