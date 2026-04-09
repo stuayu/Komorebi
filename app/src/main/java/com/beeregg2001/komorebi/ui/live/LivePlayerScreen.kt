@@ -62,6 +62,7 @@ import com.beeregg2001.komorebi.data.model.Channel
 import com.beeregg2001.komorebi.data.model.LivePlayerConstants
 import com.beeregg2001.komorebi.data.model.StreamSource
 import com.beeregg2001.komorebi.ui.theme.KomorebiTheme
+import com.google.android.material.timepicker.TimeFormat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -102,10 +103,13 @@ fun LivePlayerScreen(
     onChannelSelect: (Channel) -> Unit,
     onBackPressed: () -> Unit,
     onShowToast: (String) -> Unit,
+    isPiPMode: Boolean = false,
+    onPiPRequested: () -> Unit = {},
     channelViewModel: ChannelViewModel = hiltViewModel(),
     reserveViewModel: ReserveViewModel = hiltViewModel(),
     epgViewModel: EpgViewModel = hiltViewModel(),
-    settingsViewModel: SettingsViewModel = hiltViewModel()
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
+    timeFormat: String = "24H"
 ) {
     val context = LocalContext.current
     val colors = KomorebiTheme.colors
@@ -177,8 +181,27 @@ fun LivePlayerScreen(
     val preferredStreamSource by repository.preferredStreamSource.collectAsState(initial = "KONOMITV")
 
     LaunchedEffect(isMirakurunAvailable, preferredStreamSource) {
-        ps.currentStreamSource =
-            if (isMirakurunAvailable && preferredStreamSource == "MIRAKURUN") StreamSource.MIRAKURUN else StreamSource.KONOMITV
+        if (ps.previousStreamSource == null) {
+            ps.currentStreamSource =
+                if (isMirakurunAvailable && preferredStreamSource == "MIRAKURUN") StreamSource.MIRAKURUN else StreamSource.KONOMITV
+        }
+    }
+
+    // ★ 修正: PiP移行時、Mirakurunソースかつラボ設定がOFFなら強制的にKonomiTVにフォールバック（警告は出さずトーストのみ）
+    LaunchedEffect(isPiPMode) {
+        if (isPiPMode) {
+            if (ps.currentStreamSource == StreamSource.MIRAKURUN && allowMirakurunDual != "ON") {
+                ps.previousStreamSource = ps.currentStreamSource
+                ps.currentStreamSource = StreamSource.KONOMITV
+                onShowToast("負荷軽減のためKonomiTVソースに切り替えました")
+            }
+        } else {
+            if (!ps.isDualDisplayMode && ps.previousStreamSource != null) {
+                ps.currentStreamSource = ps.previousStreamSource!!
+                ps.previousStreamSource = null
+                onShowToast("元のストリーミングソースに復帰しました")
+            }
+        }
     }
 
     val mainFocusRequester = remember { FocusRequester() }
@@ -475,7 +498,8 @@ fun LivePlayerScreen(
         ps.currentStreamSource,
         ps.retryKey,
         ps.currentQuality,
-        ps.isDualDisplayMode
+        ps.isDualDisplayMode,
+        isPiPMode
     ) {
         if (currentChannelItem.displayChannelId.isBlank() || currentChannelItem.displayChannelId == "null") {
             return@LaunchedEffect
@@ -485,7 +509,7 @@ fun LivePlayerScreen(
         ps.sseDetail = AppStrings.SSE_CONNECTING
 
         val targetQuality =
-            if (ps.isDualDisplayMode && ps.currentQuality.value.contains("1080")) "720p" else ps.currentQuality.value
+            if ((ps.isDualDisplayMode || isPiPMode) && ps.currentQuality.value.contains("1080")) "720p" else ps.currentQuality.value
 
         val streamUrl =
             if (ps.currentStreamSource == StreamSource.MIRAKURUN && isMirakurunAvailable) {
@@ -659,7 +683,8 @@ fun LivePlayerScreen(
         ps.currentStreamSource,
         ps.retryKey,
         ps.currentQuality,
-        ps.isDualDisplayMode
+        ps.isDualDisplayMode,
+        isPiPMode
     ) {
         if (ps.currentStreamSource != StreamSource.KONOMITV) return@DisposableEffect onDispose { }
         if (currentChannelItem.displayChannelId.isBlank() || currentChannelItem.displayChannelId == "null") {
@@ -667,7 +692,8 @@ fun LivePlayerScreen(
         }
 
         val targetQuality =
-            if (ps.isDualDisplayMode && ps.currentQuality.value.contains("1080")) "720p" else ps.currentQuality.value
+            if ((ps.isDualDisplayMode || isPiPMode) && ps.currentQuality.value.contains("1080")) "720p" else ps.currentQuality.value
+
         val eventUrl = UrlBuilder.getKonomiTvLiveEventsUrl(
             konomiIp,
             konomiPort,
@@ -691,7 +717,6 @@ fun LivePlayerScreen(
                     val json = JSONObject(data)
                     ps.sseStatus = json.optString("status", "Unknown")
 
-                    // ★ 修正: 「ライブストリームはOnAirです。」が含まれていたら空文字にしてローディング画面を消す
                     val detailMsg = json.optString("detail", AppStrings.STATUS_LOADING)
                     ps.sseDetail = if (detailMsg.contains("OnAirです")) "" else detailMsg
 
@@ -847,13 +872,13 @@ fun LivePlayerScreen(
         if (isMiniListOpen) {
             channelViewModel.fetchChannels()
             delay(200); listFocusRequester.safeRequestFocus(TAG)
-        } else if (!currentIsManualOverlay && !currentIsSubMenuOpen) {
+        } else if (!currentIsManualOverlay && !currentIsSubMenuOpen && !isPiPMode) {
             delay(100); mainFocusRequester.safeRequestFocus(TAG)
         }
     }
 
     LaunchedEffect(isSubMenuOpen) {
-        if (isSubMenuOpen) {
+        if (isSubMenuOpen && !isPiPMode) {
             delay(150); subMenuFocusRequester.safeRequestFocus(TAG)
         }
     }
@@ -866,6 +891,8 @@ fun LivePlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .onKeyEvent { keyEvent ->
+                if (isPiPMode) return@onKeyEvent false
+
                 ps.handleKeyEvent(
                     keyEvent = keyEvent,
                     isSubMenuOpen = isSubMenuOpen,
@@ -883,7 +910,9 @@ fun LivePlayerScreen(
                     onPinnedOverlayChange = onPinnedOverlayChange,
                     onSubMenuToggle = onSubMenuToggle,
                     onMiniListToggle = onMiniListToggle,
-                    onShowToast = onShowToast
+                    onShowToast = onShowToast,
+                    onPiPRequested = onPiPRequested,
+                    onBackPressed = onBackPressed
                 )
             }
     ) {
@@ -944,7 +973,7 @@ fun LivePlayerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .focusRequester(mainFocusRequester)
-                    .focusable(!isMiniListOpen && !isSubMenuOpen)
+                    .focusable(!isPiPMode && !isMiniListOpen && !isSubMenuOpen)
             )
 
             val isVideoVisible =
@@ -957,41 +986,44 @@ fun LivePlayerScreen(
                 )
             }
 
-            if (isHeavyUiReady) {
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(-1, -1)
-                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                            settings.apply { javaScriptEnabled = true; domStorageEnabled = true }
-                            loadUrl("file:///android_asset/subtitle_renderer.html")
-                            webViewRef.value = this
-                        }
-                    },
-                    update = { view ->
-                        view.visibility =
-                            if (isSubtitleEnabled && !isUiVisible) android.view.View.VISIBLE else android.view.View.INVISIBLE
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            if (!isPiPMode) {
+                if (isHeavyUiReady) {
+                    AndroidView(
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(-1, -1)
+                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                settings.apply {
+                                    javaScriptEnabled = true; domStorageEnabled = true
+                                }
+                                loadUrl("file:///android_asset/subtitle_renderer.html")
+                                webViewRef.value = this
+                            }
+                        },
+                        update = { view ->
+                            view.visibility =
+                                if (isSubtitleEnabled && !isUiVisible) android.view.View.VISIBLE else android.view.View.INVISIBLE
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
-            if (isHeavyUiReady && isCommentEnabled) {
-                LiveCommentOverlay(
-                    Modifier.fillMaxSize(),
-                    isEmulator,
-                    commentSpeed,
-                    commentOpacity,
-                    commentMaxLines
-                ) { view ->
-                    danmakuViewRef.value = view
-                    if (!ps.isPlayerPlaying) view.pause()
+                if (isHeavyUiReady && isCommentEnabled) {
+                    LiveCommentOverlay(
+                        Modifier.fillMaxSize(),
+                        isEmulator,
+                        commentSpeed,
+                        commentOpacity,
+                        commentMaxLines
+                    ) { view ->
+                        danmakuViewRef.value = view
+                        if (!ps.isPlayerPlaying) view.pause()
+                    }
                 }
             }
         }
 
-        // ★ 修正: sseDetail が空文字ではない時のみローディング画面を表示する
-        androidx.compose.animation.AnimatedVisibility(visible = !ps.isDualDisplayMode && ps.currentStreamSource == StreamSource.KONOMITV && (ps.sseStatus == "Standby" || ps.sseStatus == "Offline") && ps.playerError == null && ps.sseDetail.isNotEmpty()) {
+        androidx.compose.animation.AnimatedVisibility(visible = !isPiPMode && !ps.isDualDisplayMode && ps.currentStreamSource == StreamSource.KONOMITV && (ps.sseStatus == "Standby" || ps.sseStatus == "Offline") && ps.playerError == null && ps.sseDetail.isNotEmpty()) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -1020,19 +1052,19 @@ fun LivePlayerScreen(
         }
 
         androidx.compose.animation.AnimatedVisibility(
-            visible = !ps.isDualDisplayMode && ps.isSignalInfoVisible && ps.playerError == null && !isUiVisible,
+            visible = !isPiPMode && !ps.isDualDisplayMode && ps.isSignalInfoVisible && ps.playerError == null && !isUiVisible,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
             SignalInfoOverlay(ps.signalInfo)
         }
 
-        androidx.compose.animation.AnimatedVisibility(visible = !ps.isDualDisplayMode && isPinnedOverlay && ps.playerError == null) {
-            StatusOverlay(currentChannelItem, mirakurunIp, mirakurunPort, konomiIp, konomiPort)
+        androidx.compose.animation.AnimatedVisibility(visible = !isPiPMode && !ps.isDualDisplayMode && isPinnedOverlay && ps.playerError == null) {
+            StatusOverlay(currentChannelItem, mirakurunIp, mirakurunPort, konomiIp, konomiPort, timeFormat)
         }
 
         androidx.compose.animation.AnimatedVisibility(
-            visible = !ps.isDualDisplayMode && showOverlay && ps.playerError == null && !isMiniListOpen,
+            visible = !isPiPMode && !ps.isDualDisplayMode && showOverlay && ps.playerError == null && !isMiniListOpen,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
         ) {
@@ -1045,12 +1077,13 @@ fun LivePlayerScreen(
                 konomiPort,
                 isManualOverlay,
                 isRecording,
-                scrollState
+                scrollState,
+                timeFormat
             )
         }
 
         androidx.compose.animation.AnimatedVisibility(
-            visible = isMiniListOpen && ps.playerError == null,
+            visible = !isPiPMode && isMiniListOpen && ps.playerError == null,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier
@@ -1078,7 +1111,7 @@ fun LivePlayerScreen(
         }
 
         androidx.compose.animation.AnimatedVisibility(
-            visible = isSubMenuOpen && ps.playerError == null,
+            visible = !isPiPMode && isSubMenuOpen && ps.playerError == null,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
         ) {
@@ -1094,8 +1127,14 @@ fun LivePlayerScreen(
                 isSignalInfoVisible = ps.isSignalInfoVisible,
                 isDualDisplayMode = ps.isDualDisplayMode,
                 onDualDisplayToggle = {
+                    // ★ 修正: サブメニューからの2画面切り替え時、設定がOFFなら警告を出す代わりに強制的にKonomiTVソースへ
                     if (!ps.isDualDisplayMode && ps.currentStreamSource == StreamSource.MIRAKURUN && allowMirakurunDual != "ON") {
-                        ps.showMirakurunDualWarningDialog = true
+                        ps.previousStreamSource = ps.currentStreamSource
+                        ps.currentStreamSource = StreamSource.KONOMITV
+                        ps.isDualDisplayMode = true
+                        onMiniListToggle(true)
+                        ps.activeDualPlayerIndex = 1
+                        onShowToast("負荷軽減のためKonomiTVソースに切り替えました")
                     } else {
                         if (!ps.isDualDisplayMode) {
                             ps.previousStreamSource = ps.currentStreamSource
@@ -1204,24 +1243,9 @@ fun LivePlayerScreen(
             )
         }
 
-        if (ps.showMirakurunDualWarningDialog) {
-            MirakurunDualWarningDialog(
-                onConfirm = {
-                    ps.showMirakurunDualWarningDialog = false
-                    ps.previousStreamSource = ps.currentStreamSource
-                    ps.currentStreamSource = StreamSource.KONOMITV
-                    ps.isDualDisplayMode = true
-                    onMiniListToggle(true)
-                    ps.activeDualPlayerIndex = 1
-                },
-                onDismiss = {
-                    ps.showMirakurunDualWarningDialog = false
-                    scope.launch { delay(200); mainFocusRequester.safeRequestFocus(TAG) }
-                }
-            )
-        }
+        // ★ 削除: MirakurunDualWarningDialog は完全に削除しました
 
-        if (ps.playerError != null) {
+        if (!isPiPMode && ps.playerError != null) {
             LiveErrorDialog(ps.playerError!!, { ps.retry() }, onBackPressed)
         }
     }

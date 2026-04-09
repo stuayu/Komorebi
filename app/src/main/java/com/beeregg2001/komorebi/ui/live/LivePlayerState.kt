@@ -60,6 +60,10 @@ class LivePlayerState(
     var isCenterLongPressHandled by mutableStateOf(false)
     var lastInteractionTime by mutableLongStateOf(System.currentTimeMillis())
 
+    // ★ 追加: 戻るキー長押し判定用
+    var backKeyDownTime by mutableLongStateOf(0L)
+    var isBackKeyLongPressed by mutableStateOf(false)
+
     var showMirakurunDualWarningDialog by mutableStateOf(false)
     var previousStreamSource by mutableStateOf<StreamSource?>(null)
 
@@ -135,13 +139,17 @@ class LivePlayerState(
         onPinnedOverlayChange: (Boolean) -> Unit,
         onSubMenuToggle: (Boolean) -> Unit,
         onMiniListToggle: (Boolean) -> Unit,
-        onShowToast: (String) -> Unit
+        onShowToast: (String) -> Unit,
+        // ★ 追加: コールバック
+        onPiPRequested: () -> Unit,
+        onBackPressed: () -> Unit
     ): Boolean {
         if (this.playerError != null || isSubMenuOpen || isMiniListOpen) return false
 
         val keyCode = keyEvent.nativeKeyEvent.keyCode
         val isActionDown = keyEvent.type == KeyEventType.KeyDown
         val isActionUp = keyEvent.type == KeyEventType.KeyUp
+        val repeatCount = keyEvent.nativeKeyEvent.repeatCount
 
         if (isActionDown) {
             this.lastInteractionTime = System.currentTimeMillis()
@@ -151,8 +159,6 @@ class LivePlayerState(
             if (isActionDown) {
                 if (keyEvent.nativeKeyEvent.repeatCount > 0 && !isCenterLongPressHandled) {
                     isCenterLongPressHandled = true
-                    // ★ 修正: 長押しはAIパネルに任せるため、左右スワップのロジックを削除しました。
-                    // 長押しフラグだけを立てておくことで、指を離した時の誤爆を防ぎます。
                     return true
                 }
                 return true
@@ -178,6 +184,57 @@ class LivePlayerState(
                     }
                     return true
                 }
+            }
+        }
+
+        // ★ 戻るキー長押しの実装
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK || keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
+            if (this.isDualDisplayMode) {
+                // 2画面時はPiPを許可せず、2画面の解除を行う
+                if (isActionDown) {
+                    // ★ 修正: サブメニュー等の他のレイヤーが開いていてDownイベントが消費された場合は記録しない
+                    if (repeatCount == 0) {
+                        backKeyDownTime = System.currentTimeMillis()
+                    }
+                    return true
+                } else if (isActionUp) {
+                    // ★ 修正: この画面で正常にDownイベントをキャッチしていた場合のみ、解除処理を行う
+                    if (backKeyDownTime > 0) {
+                        this.isDualDisplayMode = false
+                        this.leftScreenWeight = 1f
+                        this.rightScreenWeight = 1f
+                        this.previousStreamSource?.let {
+                            this.currentStreamSource = it
+                            this.previousStreamSource = null
+                        }
+                    }
+                    // リセットして次の入力に備える
+                    backKeyDownTime = 0L
+                    return true
+                }
+                return true
+            }
+
+            if (isActionDown) {
+                if (repeatCount == 0) {
+                    backKeyDownTime = System.currentTimeMillis()
+                    isBackKeyLongPressed = false
+                } else {
+                    val elapsed = System.currentTimeMillis() - backKeyDownTime
+                    if (!isBackKeyLongPressed && elapsed > 500) {
+                        isBackKeyLongPressed = true
+                        onPiPRequested()
+                    }
+                }
+                return true
+            } else if (isActionUp) {
+                val elapsed = System.currentTimeMillis() - backKeyDownTime
+                if (!isBackKeyLongPressed && elapsed < 500) {
+                    onBackPressed()
+                }
+                backKeyDownTime = 0L
+                isBackKeyLongPressed = false
+                return true
             }
         }
 
@@ -238,19 +295,6 @@ class LivePlayerState(
                 }
                 if (!showOverlay && !isPinnedOverlay && !isMiniListOpen) {
                     onMiniListToggle(true)
-                    return true
-                }
-            }
-
-            android.view.KeyEvent.KEYCODE_BACK -> {
-                if (this.isDualDisplayMode) {
-                    this.isDualDisplayMode = false
-                    this.leftScreenWeight = 1f
-                    this.rightScreenWeight = 1f
-                    this.previousStreamSource?.let {
-                        this.currentStreamSource = it
-                        this.previousStreamSource = null
-                    }
                     return true
                 }
             }

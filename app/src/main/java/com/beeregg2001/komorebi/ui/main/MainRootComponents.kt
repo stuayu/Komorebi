@@ -54,7 +54,7 @@ fun AiTextInputDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         LaunchedEffect(Unit) {
-            delay(100)
+            delay(300)
             runCatching { focusRequester.requestFocus() }
         }
 

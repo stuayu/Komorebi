@@ -87,12 +87,13 @@ fun EpgNavigationContainer(
     activeSearchQuery: String,
     searchResults: List<UiSearchResultItem>,
     isSearching: Boolean,
-    onClearSearch: () -> Unit
+    onClearSearch: () -> Unit,
+    timeFormat: String
 ) {
     val scope = rememberCoroutineScope()
     val colors = KomorebiTheme.colors
 
-    val timeFormat by settingsViewModel.timeFormat.collectAsState()
+//    val timeFormat by settingsViewModel.timeFormat.collectAsState()
 
     var isInternalJumping by remember { mutableStateOf(false) }
 
@@ -108,7 +109,6 @@ fun EpgNavigationContainer(
     val historyListFocusRequester = remember { FocusRequester() }
     val historyFirstItemFocusRequester = remember { FocusRequester() }
 
-    // ★修正: 変数名をリスト全体を指すように変更
     val searchResultsListRequester = remember { FocusRequester() }
     val searchResultsBackButtonRequester = remember { FocusRequester() }
 
@@ -146,7 +146,6 @@ fun EpgNavigationContainer(
             delay(150)
             if (activeSearchQuery.isNotEmpty()) {
                 if (searchResults.isNotEmpty()) {
-                    // ★修正: リスト全体へフォーカスを要求（focusRestorerが自動で元のアイテムへ導いてくれる）
                     searchResultsListRequester.safeRequestFocus("DetailToSearchResult")
                 } else {
                     searchResultsBackButtonRequester.safeRequestFocus("DetailToSearchEmpty")
@@ -197,7 +196,6 @@ fun EpgNavigationContainer(
             } else {
                 delay(150)
                 if (searchResults.isNotEmpty()) {
-                    // ★修正: リスト全体へフォーカスを要求
                     searchResultsListRequester.safeRequestFocus("SearchResults_List")
                 } else {
                     searchResultsBackButtonRequester.safeRequestFocus("SearchResults_Empty")
@@ -289,7 +287,7 @@ fun EpgNavigationContainer(
                                 .focusProperties {
                                     up = mainTabFocusRequester
                                     left = FocusRequester.Cancel
-                                    down = searchResultsListRequester // ★修正: リスト全体を指定
+                                    down = searchResultsListRequester
                                 },
                             colors = IconButtonDefaults.colors(
                                 containerColor = colors.surface.copy(alpha = 0.5f),
@@ -324,8 +322,9 @@ fun EpgNavigationContainer(
                             isSearching = isSearching,
                             reserves = reserves,
                             onProgramClick = { onProgramSelected(it) },
-                            listFocusRequester = searchResultsListRequester, // ★修正: 変数名を変更
-                            backButtonFocusRequester = searchResultsBackButtonRequester
+                            listFocusRequester = searchResultsListRequester,
+                            backButtonFocusRequester = searchResultsBackButtonRequester,
+                            timeFormat = timeFormat
                         )
                     }
                 }
@@ -511,8 +510,14 @@ fun EpgNavigationContainer(
             modifier = Modifier.zIndex(10f)
         ) {
             val now = remember { OffsetDateTime.now() }
+            // ★ 修正: ジャンプメニューを開く際、現在フォーカスしている時間を初期値として渡す
+            val initialTime =
+                remember(isJumpMenuOpen) { epgViewModel.lastFocusedTime ?: OffsetDateTime.now() }
+
             EpgJumpMenu(
                 dates = remember(now) { List(7) { now.plusDays(it.toLong()) } },
+                initialTime = initialTime, // ★ 修正: これにより開いた瞬間から見ている時間帯に合う
+                timeFormat = timeFormat,
                 onSelect = { selectedTime ->
                     scope.launch {
                         isInternalJumping = true

@@ -56,6 +56,7 @@ import com.beeregg2001.komorebi.viewmodel.*
 import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private const val TAG = "LiveContent"
 
@@ -73,7 +74,12 @@ fun LiveContent(
     topNavFocusRequester: FocusRequester, contentFirstItemRequester: FocusRequester,
     onPlayerStateChanged: (Boolean) -> Unit, lastFocusedChannelId: String? = null,
     isReturningFromPlayer: Boolean = false, onReturnFocusConsumed: () -> Unit = {},
-    reserveViewModel: ReserveViewModel
+    reserveViewModel: ReserveViewModel,
+    timeFormat: String = "24H",
+    isPiPMode: Boolean = false,
+    // ★ 追加: AI復帰シグナル
+    aiFocusReturnTick: Int = 0,
+    onAiReturnConsumed: () -> Unit = {}
 ) {
     val liveRows by channelViewModel.liveRows.collectAsState()
     val listState = rememberLazyListState()
@@ -93,6 +99,47 @@ fun LiveContent(
     var pendingChannel by remember { mutableStateOf<UiChannelState?>(null) }
     var focusedChannel by remember { mutableStateOf<UiChannelState?>(null) }
 
+    // ★ 追加(Step4): AIコンシェルジュ復帰時のスクロール＆フォーカス処理
+    // 記憶している lastFocusedChannelId から「何行目の何番目か」を計算して戻ります。
+    LaunchedEffect(aiFocusReturnTick) {
+        if (aiFocusReturnTick > 0) {
+            delay(150)
+            val targetId = lastFocusedChannelId
+            if (targetId != null && liveRows.isNotEmpty()) {
+                var rowIndex = -1
+                var colIndex = -1
+                var genreId = ""
+
+                // 二次元配列（liveRows）の中から、対象のチャンネルIDを持つ要素のインデックスを探す
+                for (i in liveRows.indices) {
+                    val idx = liveRows[i].channels.indexOfFirst { it.channel.id == targetId }
+                    if (idx != -1) {
+                        rowIndex = i
+                        colIndex = idx
+                        genreId = liveRows[i].genreId
+                        break
+                    }
+                }
+
+                if (rowIndex != -1 && colIndex != -1) {
+                    // 行方向（縦）のスクロール
+                    listState.scrollToItem(maxOf(0, rowIndex))
+                    // 列方向（横）のスクロール
+                    val rState = rowStates.getOrPut(genreId) { LazyListState() }
+                    rState.scrollToItem(maxOf(0, colIndex - 1))
+
+                    delay(200)
+                    targetChannelFocusRequester.safeRequestFocusWithRetry("LiveChannelAiReturn")
+                } else {
+                    contentFirstItemRequester.safeRequestFocusWithRetry("LiveFirstItemAiReturn")
+                }
+            } else {
+                contentFirstItemRequester.safeRequestFocusWithRetry("LiveFirstItemAiReturn")
+            }
+            onAiReturnConsumed()
+        }
+    }
+
     LaunchedEffect(pendingChannel) {
         if (pendingChannel != null) {
             delay(300)
@@ -101,10 +148,23 @@ fun LiveContent(
     }
 
     LaunchedEffect(liveRows) {
-        if (focusedChannel == null && liveRows.isNotEmpty()) {
-            val firstChannel = liveRows.firstOrNull()?.channels?.firstOrNull()
-            if (firstChannel != null) {
-                pendingChannel = firstChannel
+        if (liveRows.isNotEmpty()) {
+            val currentId = pendingChannel?.channel?.id ?: focusedChannel?.channel?.id
+
+            if (currentId == null) {
+                val firstChannel = liveRows.firstOrNull()?.channels?.firstOrNull()
+                if (firstChannel != null) {
+                    pendingChannel = firstChannel
+                }
+            } else {
+                val updatedChannel = liveRows
+                    .flatMap { it.channels }
+                    .find { it.channel.id == currentId }
+
+                if (updatedChannel != null) {
+                    pendingChannel = updatedChannel
+                    focusedChannel = updatedChannel
+                }
             }
         }
     }
@@ -165,7 +225,7 @@ fun LiveContent(
             Column(
                 modifier = modifier
                     .fillMaxSize()
-                    .then(if (isPlayerActive) Modifier.focusProperties {
+                    .then(if (isPlayerActive && !isPiPMode) Modifier.focusProperties {
                         up = FocusRequester.Cancel
                         down = FocusRequester.Cancel
                         left = FocusRequester.Cancel
@@ -182,7 +242,8 @@ fun LiveContent(
                         HeroDashboard(
                             uiState = focusedChannel!!,
                             konomiIp = konomiIp,
-                            konomiPort = konomiPort
+                            konomiPort = konomiPort,
+                            timeFormat = timeFormat
                         )
                     }
                 }
@@ -238,7 +299,6 @@ fun LiveContent(
                                                 if (row.genreId == liveRows.firstOrNull()?.genreId) {
                                                     up = topNavFocusRequester
                                                 }
-                                                // 🌟 追加: 端でのフォーカス抜け落ち（設定ボタン等への誤爆）防止
                                                 if (index == 0) left = FocusRequester.Cancel
                                                 if (isLastItem) right = FocusRequester.Cancel
                                             }
@@ -257,7 +317,7 @@ fun LiveContent(
             }
         }
 
-        if (selectedChannel != null) {
+        if (selectedChannel != null && !isPiPMode) {
             LivePlayerScreen(
                 channel = selectedChannel,
                 mirakurunIp = mirakurunIp,
@@ -289,7 +349,8 @@ fun LiveContent(
 fun HeroDashboard(
     uiState: UiChannelState,
     konomiIp: String,
-    konomiPort: String
+    konomiPort: String,
+    timeFormat: String = "24H"
 ) {
     val colors = KomorebiTheme.colors
     val present = uiState.channel.programPresent
@@ -300,7 +361,9 @@ fun HeroDashboard(
     val formatTime = { timeStr: String? ->
         if (timeStr.isNullOrEmpty()) ""
         else try {
-            OffsetDateTime.parse(timeStr).format(DateTimeFormatter.ofPattern("HH:mm"))
+            val pattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+            OffsetDateTime.parse(timeStr)
+                .format(DateTimeFormatter.ofPattern(pattern, java.util.Locale.JAPANESE))
         } catch (e: Exception) {
             ""
         }

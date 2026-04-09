@@ -33,8 +33,9 @@ fun EpgSearchResultsScreen(
     isSearching: Boolean,
     reserves: List<ReserveItem>,
     onProgramClick: (EpgProgram) -> Unit,
-    listFocusRequester: FocusRequester, // ★修正: リスト全体に対するRequesterに変更
-    backButtonFocusRequester: FocusRequester
+    listFocusRequester: FocusRequester,
+    backButtonFocusRequester: FocusRequester,
+    timeFormat: String // ★ 追加: 時間フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
 
@@ -80,9 +81,9 @@ fun EpgSearchResultsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxSize()
-                    .focusRequester(listFocusRequester) // ★修正: リスト全体に適用
-                    .focusGroup() // ★追加: フォーカスグループ化
-                    .focusRestorer() // ★追加: 最後にフォーカスされていたアイテムを自動記憶＆復元！
+                    .focusRequester(listFocusRequester)
+                    .focusGroup()
+                    .focusRestorer()
             ) {
                 itemsIndexed(searchResults, key = { _, item -> item.program.id }) { index, item ->
                     val reserve = reserves.find { it.program.id == item.program.id }
@@ -91,10 +92,10 @@ fun EpgSearchResultsScreen(
                         resultItem = item,
                         reserveItem = reserve,
                         onClick = { onProgramClick(item.program) },
-                        // ★修正: 上への導線は index == 0 の時だけ残し、Requesterは外す
                         modifier = if (index == 0) {
                             Modifier.focusProperties { up = backButtonFocusRequester }
-                        } else Modifier
+                        } else Modifier,
+                        timeFormat = timeFormat // ★ 追加: 下のコンポーネントへ渡す
                     )
                 }
             }

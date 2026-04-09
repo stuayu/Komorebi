@@ -61,6 +61,9 @@ fun SettingsScreen(
     val totalRecordCount by viewModel.totalRecordCount.collectAsState()
     val lastSyncedAt by viewModel.lastSyncedAt.collectAsState()
 
+    // ★ 追加: ViewModelからベータ版受信設定の状態を購読
+    val receiveBetaUpdates by viewModel.receiveBetaUpdates.collectAsState()
+
     val groupedChannels by channelViewModel.groupedChannels.collectAsState()
     val flatChannels = remember(groupedChannels) { groupedChannels.values.flatten() }
 
@@ -86,7 +89,8 @@ fun SettingsScreen(
                 FocusRequester(),
                 FocusRequester(),
                 FocusRequester(),
-                FocusRequester()
+                FocusRequester(),
+                FocusRequester() // ★ 修正: General用に FocusRequester を 4個 → 5個 に増強
             ), // 0: General
             listOf(
                 FocusRequester(),
@@ -112,7 +116,6 @@ fun SettingsScreen(
                 FocusRequester(),
                 FocusRequester()
             ), // 4: Home
-            // ★ 修正: Displayに項目を追加したので、リストの要素数を3から4に増やす
             listOf(
                 FocusRequester(),
                 FocusRequester(),
@@ -126,11 +129,7 @@ fun SettingsScreen(
                 FocusRequester(),
                 FocusRequester()
             ), // 6: Comment
-            listOf(
-                FocusRequester(), // 0: dualR (Mirakurun)
-                FocusRequester(), // 1: baseballR
-                FocusRequester()  // 2: apiKeyR
-            ),
+            listOf(FocusRequester(), FocusRequester(), FocusRequester()), // 7: Lab
             listOf(FocusRequester()) // 8: AppInfo
         )
     }
@@ -259,6 +258,23 @@ fun SettingsScreen(
                     0 -> GeneralSettingsContent(
                         totalRecordCount = totalRecordCount,
                         lastSyncedAt = lastSyncedAt,
+                        // ★ 追加: ベータ設定の引数を渡す
+                        receiveBetaUpdates = receiveBetaUpdates,
+                        onToggleBetaUpdates = { newValue ->
+                            scope.launch {
+                                repository.saveBoolean(
+                                    SettingsRepository.RECEIVE_BETA_UPDATES,
+                                    newValue
+                                )
+                            }
+                        },
+                        betaUpdateR = itemFocusRequesters[0][0],
+                        // ★ 修正: 残りのインデックスを1つずつずらす
+                        dbInfoR = itemFocusRequesters[0][1],
+                        forceSyncR = itemFocusRequesters[0][2],
+                        clearChannelR = itemFocusRequesters[0][3],
+                        clearHistoryR = itemFocusRequesters[0][4],
+                        // ----------
                         onForceSync = {
                             uiState.activeDialog = SettingDialogState.ConfirmClear(
                                 "データベースの再構築",
@@ -277,10 +293,6 @@ fun SettingsScreen(
                                 AppStrings.DIALOG_CLEAR_WATCH_HISTORY_MSG
                             ) { onClearWatchHistory() }
                         },
-                        dbInfoR = itemFocusRequesters[0][0],
-                        forceSyncR = itemFocusRequesters[0][1],
-                        clearChannelR = itemFocusRequesters[0][2],
-                        clearHistoryR = itemFocusRequesters[0][3],
                         sidebarR = categoryFocusRequesters[0],
                         onClick = {
                             uiState.restoreFocusRequester = it; uiState.restoreCategoryIndex = 0
@@ -774,11 +786,27 @@ fun SettingsScreen(
                             }
                         },
                         onToggleMirakurunDual = {
-                            scope.launch {
-                                repository.saveString(
-                                    SettingsRepository.LAB_ALLOW_MIRAKURUN_DUAL,
-                                    if (prefs.labAllowMirakurunDual == "ON") "OFF" else "ON"
-                                )
+                            if (prefs.labAllowMirakurunDual == "OFF") {
+                                uiState.activeDialog = SettingDialogState.ConfirmClear(
+                                    title = "【警告】ハードウェア負荷について",
+                                    message = "Mirakurunソース（生TS）での2画面再生やPiPモードは、端末のハードウェアデコーダーとメモリに極めて高い負荷をかけます。\n\n" +
+                                            "Fire TV Stick等の低スペック端末では、画面が緑色になったり、アプリがクラッシュする可能性があります。\n\n" +
+                                            "このリスクを理解した上で有効にしますか？"
+                                ) {
+                                    scope.launch {
+                                        repository.saveString(
+                                            SettingsRepository.LAB_ALLOW_MIRAKURUN_DUAL,
+                                            "ON"
+                                        )
+                                    }
+                                }
+                            } else {
+                                scope.launch {
+                                    repository.saveString(
+                                        SettingsRepository.LAB_ALLOW_MIRAKURUN_DUAL,
+                                        "OFF"
+                                    )
+                                }
                             }
                         },
                         onClick = {
@@ -830,6 +858,7 @@ fun SettingsScreen(
         is SettingDialogState.ConfirmClear -> ConfirmClearDialog(
             title = state.title,
             message = state.message,
+            confirmButtonText = if (state.title.contains("警告")) "有効にする" else "削除",
             onConfirm = { state.onConfirm(); closeDialog() },
             onDismiss = { closeDialog() })
 

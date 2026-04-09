@@ -135,8 +135,6 @@ class HomeViewModel @Inject constructor(
         _sharedEpgData.value = data
     }
 
-    // HomeViewModel.kt の fetchAllTypeGenrePickup() 内部を以下のように修正
-
     private fun fetchAllTypeGenrePickup() {
         viewModelScope.launch {
             val genre = pickupGenreLabel.value
@@ -322,7 +320,9 @@ class HomeViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            appUpdater.checkForUpdates()
+            // ★ 修正: SettingsRepository から現在のベータ受信設定を取得して引数に渡す
+            val receiveBeta = settingsRepository.receiveBetaUpdates.first()
+            appUpdater.checkForUpdates(receiveBetaUpdates = receiveBeta)
         }
     }
 

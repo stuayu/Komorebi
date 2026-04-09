@@ -55,11 +55,6 @@ import com.beeregg2001.komorebi.viewmodel.SeriesInfo
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/**
- * 「ビデオ」タブから遷移する、すべての録画番組・シリーズを探すための総合リスト画面。
- * Paging3を用いた無限スクロールリスト、サイドナビゲーション（カテゴリやジャンルでの絞り込み）、
- * 検索バー、そしてリスト/グリッド表示の切り替えなどを統括します。
- */
 @androidx.annotation.OptIn(UnstableApi::class)
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
@@ -71,18 +66,20 @@ fun RecordListScreen(
     onProgramClick: (RecordedProgram, Double?) -> Unit,
     onBack: () -> Unit,
     isFromVideoTabSearch: Boolean = false,
-    // ★追加: プレイヤーからの復帰を検知して元の位置に戻るためのプロパティ
     isReturningFromPlayer: Boolean = false,
     lastPlayedProgramId: Int? = null,
-    onReturnFocusConsumed: () -> Unit = {}
+    onReturnFocusConsumed: () -> Unit = {},
+    timeFormat: String = "24H",
+    autoReserveKeywords: List<String> = emptyList(),
+    onAutoReserveClick: (RecordedProgram) -> Unit = {},
+    // ★ 追加(Step3): AIコンシェルジュ復帰シグナルを受け取る
+    aiFocusReturnTick: Int = 0,
+    onAiReturnConsumed: () -> Unit = {}
 ) {
     val colors = KomorebiTheme.colors
     val scope = rememberCoroutineScope()
     val syncProgress by viewModel.syncProgress.collectAsState()
 
-    // ==========================================
-    // 1. 初回DB構築中のブロッキングUI
-    // ==========================================
     if (syncProgress.isInitialSyncPhase) {
         val blockFocusRequester = remember { FocusRequester() }
         LaunchedEffect(Unit) { delay(100); blockFocusRequester.safeRequestFocus("InitialSyncBlock") }
@@ -147,9 +144,6 @@ fun RecordListScreen(
         return
     }
 
-    // ==========================================
-    // 2. ViewModelからのデータ・Stateの収集
-    // ==========================================
     val pagedRecordings = viewModel.pagedRecordings.collectAsLazyPagingItems()
     val searchHistory by viewModel.searchHistory.collectAsState()
     val groupedChannels by viewModel.groupedChannels.collectAsState()
@@ -171,12 +165,12 @@ fun RecordListScreen(
     val focuses = rememberRecordListFocusRequesters()
     val ticketManager = rememberFocusTicketManager()
 
-    // ==========================================
-    // 3. ローカルUI Stateの管理
-    // ==========================================
     var focusedProgram by remember { mutableStateOf<RecordedProgram?>(null) }
     var focusedSeries by remember { mutableStateOf<SeriesInfo?>(null) }
     var savedFocusProgramId by remember { mutableStateOf<Int?>(null) }
+
+    // ★ 追加: フォーカスが外れても「最後に見ていたID」を保持し続ける変数
+    var lastKnownFocusedId by remember { mutableStateOf<Int?>(null) }
 
     val paneTransitionState =
         remember { MutableTransitionState(false) }.apply { targetState = menuState.isPaneOpen }
@@ -212,9 +206,6 @@ fun RecordListScreen(
         )
     }
 
-    // ==========================================
-    // 4. リスト・グリッドのスクロール状態管理
-    // ==========================================
     val stateKey = remember(
         selectedCategory,
         selectedGenre,
@@ -281,11 +272,24 @@ fun RecordListScreen(
 
     val isNavOverlayVisible = !isListView && menuState.isNavPaneOpen
 
-    // ==========================================
-    // 5. 非同期フォーカスチケットの消費ループ
-    // ==========================================
     val currentTicket = ticketManager.currentTicket
     val issueTime = ticketManager.issueTime
+
+    // ★ 修正: AIコンシェルジュから戻ってきた時のフォーカス復元（チケット発行）
+    LaunchedEffect(aiFocusReturnTick) {
+        if (aiFocusReturnTick > 0) {
+            // Android TVのフォーカス復帰ラグを考慮し、少し長めに待つ
+            delay(400)
+
+            // 記憶しておいたIDを使ってチケット発行
+            if (lastKnownFocusedId != null) {
+                ticketManager.issue(FocusTicket.TARGET_ID, lastKnownFocusedId)
+            } else {
+                ticketManager.issue(FocusTicket.LIST_TOP)
+            }
+            onAiReturnConsumed()
+        }
+    }
 
     LaunchedEffect(currentTicket, issueTime, isListFirstItemReady, hasContent, isLoadingAny) {
         when (currentTicket) {
@@ -318,8 +322,6 @@ fun RecordListScreen(
         }
     }
 
-    // ★追加: 画面が再構築されたときの初回フォーカスチケット発行処理
-    // プレイヤーから戻った場合は TARGET_ID を、そうでない場合は LIST_TOP を発行
     LaunchedEffect(Unit) {
         if (menuState.isInitialFocusRequested) {
             delay(200)
@@ -333,14 +335,11 @@ fun RecordListScreen(
         }
     }
 
-    // ==========================================
-    // 6. ユーザーアクションのハンドリング関数
-    // ==========================================
-
     val executeSearch: (String) -> Unit = { query ->
         savedFocusProgramId = null
         focusedProgram = null
         focusedSeries = null
+        lastKnownFocusedId = null // ★ 追加
         viewModel.searchRecordings(query)
         menuState.isSearchBarVisible = false; menuState.isDetailActive = false
         ticketManager.issue(FocusTicket.LIST_TOP)
@@ -352,6 +351,7 @@ fun RecordListScreen(
         savedFocusProgramId = null
         focusedProgram = null
         focusedSeries = null
+        lastKnownFocusedId = null // ★ 追加
 
         if (isSameCategory) {
             when (category) {
@@ -470,9 +470,6 @@ fun RecordListScreen(
         animationSpec = tween(350, easing = FastOutSlowInEasing), label = "ContentStartPadding"
     )
 
-    // ==========================================
-    // 7. UI コンポジション (画面描画)
-    // ==========================================
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -521,7 +518,10 @@ fun RecordListScreen(
                                     onBackPress = handleBackPress,
                                     listState = seriesListState,
                                     ticketManager = ticketManager,
-                                    onFocusedSeriesChanged = { focusedSeries = it }
+                                    onFocusedSeriesChanged = {
+                                        focusedSeries = it
+                                        if (it != null) lastKnownFocusedId = it.representativeVideoId // ★ 追加
+                                    }
                                 )
                             }
 
@@ -553,9 +553,17 @@ fun RecordListScreen(
                                     fetchedProgramDetail = programDetail,
                                     onFetchDetail = { viewModel.fetchProgramDetail(it) },
                                     onClearDetail = { viewModel.clearProgramDetail() },
-                                    onFocusedItemChanged = { focusedProgram = it },
+                                    onFocusedItemChanged = {
+                                        focusedProgram = it
+                                        if (it != null) lastKnownFocusedId = it.id // ★ 追加
+                                    },
                                     onOpenNavPane = handleOpenNavPane,
-                                    onTopBarDownRequesterChanged = { listContentDownRequester = it }
+                                    onTopBarDownRequesterChanged = {
+                                        listContentDownRequester = it
+                                    },
+                                    timeFormat = timeFormat,
+                                    autoReserveKeywords = autoReserveKeywords,
+                                    onAutoReserveClick = onAutoReserveClick
                                 )
                             }
                         }
@@ -579,7 +587,10 @@ fun RecordListScreen(
                                     onBackPress = handleBackPress,
                                     gridState = gridState,
                                     ticketManager = ticketManager,
-                                    onFocusedSeriesChanged = { focusedSeries = it }
+                                    onFocusedSeriesChanged = {
+                                        focusedSeries = it
+                                        if (it != null) lastKnownFocusedId = it.representativeVideoId // ★ 追加
+                                    }
                                 )
                             }
 
@@ -598,7 +609,10 @@ fun RecordListScreen(
                                     onProgramClick = onProgramClick,
                                     onOpenNavPane = handleOpenNavPane,
                                     ticketManager = ticketManager,
-                                    onFocusedItemChanged = { focusedProgram = it }
+                                    onFocusedItemChanged = {
+                                        focusedProgram = it
+                                        if (it != null) lastKnownFocusedId = it.id // ★ 追加
+                                    }
                                 )
                             }
                         }
@@ -625,9 +639,11 @@ fun RecordListScreen(
                 }
             }
 
-            Box(modifier = Modifier
-                .zIndex(5f)
-                .fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .zIndex(5f)
+                    .fillMaxSize()
+            ) {
                 RecordListOverlay(
                     menuState = menuState,
                     focuses = focuses,

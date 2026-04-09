@@ -98,9 +98,13 @@ fun ReserveListScreen(
     contentFirstItemRequester: FocusRequester? = null,
     topNavFocusRequester: FocusRequester? = null,
     isReserveOverlayOpen: Boolean = false,
-    isReturningFromPlayer: Boolean = false, // ★追加: プレイヤーからの復帰フラグ
-    onReturnFocusConsumed: () -> Unit = {}, // ★追加: 復帰完了時のコールバック
-    viewModel: ReserveViewModel = hiltViewModel()
+    isReturningFromPlayer: Boolean = false,
+    onReturnFocusConsumed: () -> Unit = {},
+    viewModel: ReserveViewModel = hiltViewModel(),
+    timeFormat: String = "24H",
+    // ★ 追加(Step3): AIコンシェルジュからの復帰シグナル
+    aiFocusReturnTick: Int = 0,
+    onAiReturnConsumed: () -> Unit = {}
 ) {
     val reserves by viewModel.reserves.collectAsState()
     val normalReserves by viewModel.normalReserves.collectAsState()
@@ -125,7 +129,24 @@ fun ReserveListScreen(
 
     var previousOverlayOpen by remember { mutableStateOf(isReserveOverlayOpen) }
 
-    // ★追加: プレイヤーから復帰した際のチケット発行処理
+    // ★ 追加(Step3): AIコンシェルジュから戻ってきた時のフォーカス復元（チケット発行）
+    LaunchedEffect(aiFocusReturnTick) {
+        if (aiFocusReturnTick > 0) {
+            Log.i("KomorebiFocus", "[ReserveList] AIコンシェルジュから復帰。チケットを発行します。")
+            delay(150) // パネルが閉じるアニメーションを待つ
+            val conditionId = viewModel.lastClickedConditionId
+            val reserveId = viewModel.lastClickedReserveId
+            if (conditionId != null) {
+                ticketManager.issueForCondition(conditionId)
+            } else if (reserveId != null) {
+                ticketManager.issueForReserve(reserveId)
+            } else {
+                ticketManager.issueForTop()
+            }
+            onAiReturnConsumed()
+        }
+    }
+
     LaunchedEffect(isReturningFromPlayer) {
         if (isReturningFromPlayer) {
             Log.i("KomorebiFocus", "[ReserveList] プレイヤーから復帰しました。チケットを発行します。")
@@ -139,7 +160,7 @@ fun ReserveListScreen(
             } else {
                 contentFirstItemRequester?.safeRequestFocusWithRetry("ReserveListFallback")
             }
-            onReturnFocusConsumed() // 処理完了を通知
+            onReturnFocusConsumed()
         }
     }
 
@@ -336,8 +357,10 @@ fun ReserveListScreen(
                     .focusRequester(contentFirstItemRequester)
                     .onFocusChanged {
                         if (it.isFocused) {
-                            Log.i("KomorebiFocus", "[ReserveList] TopNavからDOWN -> 内部タブへフォーカスを転送します")
-                            // ★修正: Suspend関数なので scope.launch で囲む！
+                            Log.i(
+                                "KomorebiFocus",
+                                "[ReserveList] TopNavからDOWN -> 内部タブへフォーカスを転送します"
+                            )
                             scope.launch {
                                 tabFocusRequesters[selectedTabIndex].safeRequestFocusWithRetry("TopNavToTab")
                             }
@@ -477,7 +500,8 @@ fun ReserveListScreen(
                                                     viewModel.lastClickedReserveId = program.id
                                                     viewModel.lastClickedConditionId = null
                                                 }
-                                            }
+                                            },
+                                        timeFormat = timeFormat
                                     )
                                 }
                             }
@@ -534,7 +558,8 @@ fun ReserveListScreen(
                                                     viewModel.lastClickedReserveId = program.id
                                                     viewModel.lastClickedConditionId = null
                                                 }
-                                            }
+                                            },
+                                        timeFormat = timeFormat
                                     )
                                 }
                             }

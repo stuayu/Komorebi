@@ -43,21 +43,29 @@ class MainRootState {
     var reserveToDelete by mutableStateOf<ReserveItem?>(null)
     var openedSeriesTitle by mutableStateOf<String?>(null)
 
-    // UI開閉フラグ
-    var showDeleteConfirmDialog by mutableStateOf(false)
+    // 録画リストから自動予約へ進む際のターゲット番組
+    var selectedProgramForAutoReserve by mutableStateOf<RecordedProgram?>(null)
+
+    // AIコンシェルジュ
+    var isAiConciergeOpen by mutableStateOf(false)
+    var showAiKeyboardInput by mutableStateOf(false)
+    var toastMessage by mutableStateOf<String?>(null)
+
+    val aiTicketManager = AiFocusTicketManager()
+
+    // ★ 追加: AIコンシェルジュからの復帰シグナル（カウンター）を追加
+    var aiFocusReturnTick by mutableIntStateOf(0)
+
+    // 各種オーバーレイの開閉状態
     var isEpgJumpMenuOpen by mutableStateOf(false)
-    var triggerHomeBack by mutableStateOf(false)
     var isSettingsOpen by mutableStateOf(false)
     var isRecordListOpen by mutableStateOf(false)
     var isSeriesListOpen by mutableStateOf(false)
-    var toastMessage by mutableStateOf<String?>(null)
+    var showDeleteConfirmDialog by mutableStateOf(false)
 
-    // 🌟 AIコンシェルジュ関連のフラグ・マネージャー
-    var isAiConciergeOpen by mutableStateOf(false)
-    var showAiKeyboardInput by mutableStateOf(false)
-    val aiTicketManager = AiFocusTicketManager()
+    var triggerHomeBack by mutableStateOf(false)
 
-    // プレイヤー状態
+    // プレイヤー固有の状態
     var isPlayerMiniListOpen by mutableStateOf(false)
     var playerShowOverlay by mutableStateOf(true)
     var playerIsManualOverlay by mutableStateOf(false)
@@ -66,6 +74,9 @@ class MainRootState {
     var showPlayerControls by mutableStateOf(true)
     var isPlayerSubMenuOpen by mutableStateOf(false)
     var isPlayerSceneSearchOpen by mutableStateOf(false)
+
+    // アプリ内ミニプレイヤー（PiP）のフラグ
+    var isMiniPlayerMode by mutableStateOf(false)
 
     // 履歴・復帰状態
     var lastSelectedChannelId by mutableStateOf<String?>(null)
@@ -98,6 +109,27 @@ class MainRootState {
         if (currentTime - lastBackPressTime < 500) return false
         lastBackPressTime = currentTime
         return true
+    }
+
+    // ミニプレイヤー中は「フルスクリーンではない」と判定させることで、背面のUIを生かす
+    fun isFullScreen(
+        channel: Channel?,
+        program: RecordedProgram?,
+        epgProgram: EpgProgram?,
+        settingsOpen: Boolean,
+        recordListOpen: Boolean,
+        reserveOverlayOpen: Boolean
+    ): Boolean {
+        // もしミニプレイヤー（ワイプ）化されているなら、フルスクリーンではない
+        if (isMiniPlayerMode) return false
+
+        return channel != null || program != null || epgProgram != null ||
+                settingsOpen || recordListOpen || reserveOverlayOpen ||
+                isSeriesListOpen || isAiConciergeOpen ||
+                editingCondition != null || selectedConditionReserveItem != null ||
+                selectedReserve != null || editingReserveItem != null ||
+                editingNewProgram != null || reserveToDelete != null ||
+                selectedProgramForAutoReserve != null
     }
 }
 

@@ -102,13 +102,20 @@ fun StatusOverlay(
     mirakurunIp: String?,
     mirakurunPort: String?,
     konomiIp: String,
-    konomiPort: String
+    konomiPort: String,
+    timeFormatSetting: String = "24H" // ★ 追加
 ) {
     var currentTime by remember { mutableStateOf("") }
 
+    // ★ 修正：設定に応じたフォーマッターを生成
+    val displaySdf = remember(timeFormatSetting) {
+        if (timeFormatSetting == "12H") SimpleDateFormat("a h:mm", Locale.getDefault())
+        else SimpleDateFormat("HH:mm", Locale.getDefault())
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
-            currentTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            currentTime = displaySdf.format(Date()) // ★ 修正
             delay(1000)
         }
     }
@@ -174,11 +181,16 @@ fun LiveOverlayUI(
     konomiPort: String,
     showDesc: Boolean,
     isRecording: Boolean,
-    scrollState: ScrollState
+    scrollState: ScrollState,
+    timeFormatSetting: String = "24H" // ★ 追加
 ) {
     val program = channel.programPresent
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault()) }
-    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    // ★ 修正：変数名を displaySdf に変更し、設定に応じて切り替え
+    val displaySdf = remember(timeFormatSetting) {
+        if (timeFormatSetting == "12H") SimpleDateFormat("a h:mm", Locale.getDefault())
+        else SimpleDateFormat("HH:mm", Locale.getDefault())
+    }
     var progress by remember { mutableFloatStateOf(-1f) }
     val isMirakurunAvailable = mirakurunIp.isNotBlank() && mirakurunPort.isNotBlank()
     val logoUrl = if (isMirakurunAvailable) {
@@ -297,10 +309,9 @@ fun LiveOverlayUI(
             }
 
             if (progress >= 0f) {
-                val start =
-                    program?.startTime?.let { sdf.parse(it) }?.let { timeFormat.format(it) } ?: ""
-                val end =
-                    program?.endTime?.let { sdf.parse(it) }?.let { timeFormat.format(it) } ?: ""
+                // ★ 修正：displaySdf を使用する
+                val start = program?.startTime?.let { sdf.parse(it) }?.let { displaySdf.format(it) } ?: ""
+                val end = program?.endTime?.let { sdf.parse(it) }?.let { displaySdf.format(it) } ?: ""
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier

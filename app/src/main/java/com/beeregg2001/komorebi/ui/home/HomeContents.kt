@@ -55,15 +55,14 @@ fun HomeContents(
     lastFocusedChannelId: String? = null,
     lastFocusedProgramId: String? = null,
     isTopNavFocused: Boolean = false,
-    // 🌟 チケットシステムとViewModelを追加
     ticketManager: HomeFocusTicketManager,
-    homeViewModel: HomeViewModel
+    homeViewModel: HomeViewModel,
+    timeFormat: String
 ) {
     val lazyListState = rememberTvLazyListState()
     val isFirstItemRendered =
         remember { derivedStateOf { lazyListState.layoutInfo.visibleItemsInfo.isNotEmpty() } }
 
-    // --- 既存の Effect 群 ---
     LaunchedEffect(isFirstItemRendered.value) {
         if (isFirstItemRendered.value) {
             delay(100); onUiReady()
@@ -110,10 +109,6 @@ fun HomeContents(
         }
     }
 
-    LaunchedEffect(lastWatchedChannels.isNotEmpty()) {
-        if (lastWatchedChannels.isNotEmpty()) lazyListState.scrollToItem(0)
-    }
-
     val topSection =
         remember(lastWatchedChannels, hotChannels, genrePickup, watchHistory, upcomingReserves) {
             when {
@@ -126,7 +121,6 @@ fun HomeContents(
             }
         }
 
-    // 🌟 チケットシステム: 第1段階（縦スクロール）処理
     val availableSections =
         remember(lastWatchedChannels, hotChannels, genrePickup, watchHistory, upcomingReserves) {
             val list = mutableListOf<String>()
@@ -138,6 +132,7 @@ fun HomeContents(
             list
         }
 
+    // ★ 修正(Step4): AIコンシェルジュ復帰などで HOME_RESTORE チケットが発行された時のスクロール処理を強化
     LaunchedEffect(ticketManager.currentTicket, ticketManager.issueTime) {
         if (ticketManager.currentTicket == HomeFocusTicket.HOME_RESTORE) {
             val targetSection = ticketManager.targetSection
@@ -148,9 +143,14 @@ fun HomeContents(
                         "KomorebiFocus",
                         "[$TAG] 第1段階: 対象セクション($targetSection) インデックス $index へ縦スクロール"
                     )
+                    delay(50)
                     lazyListState.scrollToItem(index)
+                    // スクロール後、各Sectionコンポーネント内にある FocusRequester が itemId を見て自動フォーカスを拾います
+                    delay(200)
                 }
             }
+            // 消費
+            ticketManager.consume(HomeFocusTicket.HOME_RESTORE)
         }
     }
 
@@ -210,7 +210,6 @@ fun HomeContents(
                             modifier = if (topSection == "lastWatched") upToTabModifier else Modifier,
                             onChannelClick = onChannelClick,
                             onUpdateHeroInfo = { pendingHeroInfo = it },
-                            // 🌟 追加
                             ticketManager = ticketManager,
                             homeViewModel = homeViewModel,
                             sectionId = "lastWatched"
@@ -226,7 +225,6 @@ fun HomeContents(
                             modifier = if (topSection == "hot") upToTabModifier else Modifier,
                             onChannelClick = onChannelClick,
                             onUpdateHeroInfo = { pendingHeroInfo = it },
-                            // 🌟 追加
                             ticketManager = ticketManager,
                             homeViewModel = homeViewModel,
                             sectionId = "hot"
@@ -245,10 +243,10 @@ fun HomeContents(
                             onProgramClick = onProgramClick,
                             onNavigateToTab = onNavigateToTab,
                             onUpdateHeroInfo = { pendingHeroInfo = it },
-                            // 🌟 追加
                             ticketManager = ticketManager,
                             homeViewModel = homeViewModel,
-                            sectionId = "pickup"
+                            sectionId = "pickup",
+                            timeFormat = timeFormat
                         )
                     }
                 }
@@ -261,7 +259,6 @@ fun HomeContents(
                             modifier = if (topSection == "history") upToTabModifier else Modifier,
                             onHistoryClick = onHistoryClick,
                             onUpdateHeroInfo = { pendingHeroInfo = it },
-                            // 🌟 追加
                             ticketManager = ticketManager,
                             homeViewModel = homeViewModel,
                             sectionId = "history"
@@ -278,10 +275,10 @@ fun HomeContents(
                             onReserveClick = onReserveClick,
                             onNavigateToTab = onNavigateToTab,
                             onUpdateHeroInfo = { pendingHeroInfo = it },
-                            // 🌟 追加
                             ticketManager = ticketManager,
                             homeViewModel = homeViewModel,
-                            sectionId = "upcoming"
+                            sectionId = "upcoming",
+                            timeFormat = timeFormat
                         )
                     }
                 }

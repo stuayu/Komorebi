@@ -45,6 +45,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class)
@@ -61,7 +62,8 @@ fun ConditionEditDialog(
     ) -> Unit,
     onConfirmDelete: (deleteRelated: Boolean) -> Unit,
     onDismiss: () -> Unit,
-    onReserveItemClick: (ReserveItem) -> Unit
+    onReserveItemClick: (ReserveItem) -> Unit,
+    timeFormat: String = "24H" // ★ 追加: 12H/24H フォーマットを受け取る
 ) {
     val colors = KomorebiTheme.colors
     val scope = rememberCoroutineScope()
@@ -128,6 +130,17 @@ fun ConditionEditDialog(
 
     var isFirstEnter by remember { mutableStateOf(true) }
 
+    // ★ 追加: 「時」のボタン用テキストを生成するラムダ
+    val formatHour: (Int) -> String = { hour ->
+        if (timeFormat == "12H") {
+            val amPm = if (hour < 12) "午前" else "午後"
+            val h12 = if (hour % 12 == 0) 12 else hour % 12
+            "$amPm $h12"
+        } else {
+            String.format("%02d", hour)
+        }
+    }
+
     LaunchedEffect(Unit) {
         delay(100)
         runCatching { enableSwitchRequester.requestFocus() }
@@ -189,23 +202,28 @@ fun ConditionEditDialog(
                             focusManager.clearFocus()
                             isEditingKeyword = false
                         }
+
                         showAdvancedSettings -> {
                             showAdvancedSettings = false
                             scope.launch { delay(100); runCatching { advancedBtnRequester.requestFocus() } }
                         }
+
                         showDeleteConfirm -> {
                             showDeleteConfirm = false
                             scope.launch { delay(100); runCatching { keywordBtnRequester.requestFocus() } }
                         }
+
                         showDayOfWeekDialog -> {
                             showDayOfWeekDialog = false
                             scope.launch { delay(100); runCatching { dayOfWeekBtnRequester.requestFocus() } }
                         }
+
                         numberSelectTarget != null -> {
                             val target = numberSelectTarget!!
                             numberSelectTarget = null
                             restoreNumberSelectFocus(target)
                         }
+
                         else -> onDismiss()
                     }
                     true
@@ -217,7 +235,7 @@ fun ConditionEditDialog(
             Box(
                 modifier = Modifier
                     .width(1000.dp)
-                    .heightIn(min = 500.dp, max = 680.dp) // maxを少し広げて安全マージンを確保
+                    .heightIn(min = 500.dp, max = 680.dp)
                     .background(colors.surface, RoundedCornerShape(12.dp))
                     .border(1.dp, colors.textPrimary.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
                     .focusProperties {
@@ -244,11 +262,11 @@ fun ConditionEditDialog(
                                         FocusDirection.Up,
                                         FocusDirection.Down,
                                         FocusDirection.Left -> FocusRequester.Cancel
+
                                         else -> FocusRequester.Default
                                     }
                                 }
                             }
-                            // ★修正: 上下のパディングを32dpから24dpに減らして空間を稼ぐ
                             .padding(horizontal = 32.dp, vertical = 24.dp)
                     ) {
                         Text(
@@ -259,7 +277,7 @@ fun ConditionEditDialog(
                         )
                         Divider(
                             color = colors.textPrimary.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp) // ★修正: 20dp -> 12dp
+                            modifier = Modifier.padding(vertical = 12.dp)
                         )
 
                         Surface(
@@ -267,7 +285,7 @@ fun ConditionEditDialog(
                             interactionSource = enableInteractionSource,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 12.dp) // ★修正: 16dp -> 12dp
+                                .padding(bottom = 12.dp)
                                 .focusRequester(enableSwitchRequester),
                             shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
                             scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
@@ -283,7 +301,7 @@ fun ConditionEditDialog(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp), // ★修正: vertical 12dp -> 8dp
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -299,7 +317,9 @@ fun ConditionEditDialog(
                                         checkedThumbColor = inverseColor,
                                         checkedTrackColor = colors.accent,
                                         uncheckedThumbColor = if (isEnableRowFocused) inverseColor else colors.textPrimary,
-                                        uncheckedTrackColor = if (isEnableRowFocused) inverseColor.copy(alpha = 0.4f) else colors.textPrimary.copy(alpha = 0.2f)
+                                        uncheckedTrackColor = if (isEnableRowFocused) inverseColor.copy(
+                                            alpha = 0.4f
+                                        ) else colors.textPrimary.copy(alpha = 0.2f)
                                     )
                                 )
                             }
@@ -377,7 +397,7 @@ fun ConditionEditDialog(
                             }
                         }
 
-                        Spacer(Modifier.height(16.dp)) // ★修正: 20dp -> 16dp
+                        Spacer(Modifier.height(16.dp))
 
                         // --- 時間絞り込みエリア ---
                         Column {
@@ -388,7 +408,7 @@ fun ConditionEditDialog(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { // ★修正: 12dp -> 8dp
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Surface(
                                     onClick = { openDayOfWeekDialog() },
                                     modifier = Modifier.focusRequester(dayOfWeekBtnRequester),
@@ -413,7 +433,7 @@ fun ConditionEditDialog(
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     TimeSelectButton(
-                                        String.format("%02d", startHour),
+                                        text = formatHour(startHour), // ★ 修正: 時刻フォーマットを適用
                                         modifier = Modifier.focusRequester(startHourBtnRequester)
                                     ) { openNumberSelect(NumberSelectType.START_HOUR) }
                                     Text(
@@ -422,7 +442,7 @@ fun ConditionEditDialog(
                                         modifier = Modifier.padding(horizontal = 4.dp)
                                     )
                                     TimeSelectButton(
-                                        String.format("%02d", startMinute),
+                                        text = String.format("%02d", startMinute),
                                         modifier = Modifier.focusRequester(startMinuteBtnRequester)
                                     ) { openNumberSelect(NumberSelectType.START_MINUTE) }
                                     Text(
@@ -431,7 +451,7 @@ fun ConditionEditDialog(
                                         modifier = Modifier.padding(horizontal = 4.dp)
                                     )
                                     TimeSelectButton(
-                                        String.format("%02d", endHour),
+                                        text = formatHour(endHour), // ★ 修正: 時刻フォーマットを適用
                                         modifier = Modifier.focusRequester(endHourBtnRequester)
                                     ) { openNumberSelect(NumberSelectType.END_HOUR) }
                                     Text(
@@ -440,20 +460,20 @@ fun ConditionEditDialog(
                                         modifier = Modifier.padding(horizontal = 4.dp)
                                     )
                                     TimeSelectButton(
-                                        String.format("%02d", endMinute),
+                                        text = String.format("%02d", endMinute),
                                         modifier = Modifier.focusRequester(endMinuteBtnRequester)
                                     ) { openNumberSelect(NumberSelectType.END_MINUTE) }
                                 }
                             }
                         }
 
-                        Spacer(Modifier.height(16.dp)) // ★修正: 24dp -> 16dp
+                        Spacer(Modifier.height(16.dp))
 
                         Surface(
                             onClick = { openAdvancedSettings() },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(44.dp) // ★修正: 48dp -> 44dp
+                                .height(44.dp)
                                 .focusRequester(advancedBtnRequester),
                             shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
                             scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
@@ -470,7 +490,6 @@ fun ConditionEditDialog(
                             ) { Text("詳細設定を開く", fontWeight = FontWeight.Bold) }
                         }
 
-                        // ★上部がスッキリしたため、ここの Spacer(weight) がしっかり隙間を作ります
                         Spacer(Modifier.weight(1f))
 
                         // --- 下部ボタン行 ---
@@ -531,7 +550,7 @@ fun ConditionEditDialog(
                         modifier = Modifier
                             .width(1.dp)
                             .fillMaxHeight()
-                            .padding(vertical = 24.dp) // ★修正: 32dp -> 24dp
+                            .padding(vertical = 24.dp)
                             .background(colors.textPrimary.copy(alpha = 0.1f))
                     )
 
@@ -550,6 +569,7 @@ fun ConditionEditDialog(
                                         FocusDirection.Up,
                                         FocusDirection.Down,
                                         FocusDirection.Right -> FocusRequester.Cancel
+
                                         else -> FocusRequester.Default
                                     }
                                 }
@@ -558,7 +578,6 @@ fun ConditionEditDialog(
                                     else FocusRequester.Default
                                 }
                             }
-                            // ★修正: 右側も合わせてパディングを減らす
                             .padding(horizontal = 32.dp, vertical = 24.dp)
                     ) {
                         Text(
@@ -569,7 +588,7 @@ fun ConditionEditDialog(
                         )
                         Divider(
                             color = colors.textPrimary.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp) // ★修正: 16dp -> 12dp
+                            modifier = Modifier.padding(vertical = 12.dp)
                         )
 
                         if (relatedReserves.isEmpty()) {
@@ -596,8 +615,14 @@ fun ConditionEditDialog(
                                     val end = runCatching {
                                         OffsetDateTime.parse(reserve.program.endTime)
                                     }.getOrNull()
-                                    val formatter = DateTimeFormatter.ofPattern("MM/dd(E) HH:mm")
-                                    val endFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+                                    val startPattern =
+                                        if (timeFormat == "12H") "MM/dd(E) a h:mm" else "MM/dd(E) HH:mm"
+                                    val endPattern = if (timeFormat == "12H") "a h:mm" else "HH:mm"
+                                    val formatter =
+                                        DateTimeFormatter.ofPattern(startPattern, Locale.JAPANESE)
+                                    val endFormatter =
+                                        DateTimeFormatter.ofPattern(endPattern, Locale.JAPANESE)
                                     val timeStr = if (start != null && end != null)
                                         "${start.format(formatter)} ～ ${end.format(endFormatter)}"
                                     else "時間不明"
@@ -819,10 +844,16 @@ fun ConditionEditDialog(
                 NumberSelectType.END_MINUTE -> endMinute
                 else -> 0
             }
+
+            // ★ 修正: 何の項目を選択しているかの判定フラグとフォーマットを渡す
+            val isHourTarget =
+                numberSelectTarget == NumberSelectType.START_HOUR || numberSelectTarget == NumberSelectType.END_HOUR
             NumberSelectionDialog(
                 title = if (range.last == 23) "時を選択" else "分を選択",
                 range = range,
                 initialValue = initVal,
+                isHour = isHourTarget,
+                timeFormat = timeFormat,
                 onConfirm = { selected ->
                     val target = numberSelectTarget!!
                     when (target) {
