@@ -26,6 +26,11 @@ import com.beeregg2001.komorebi.viewmodel.PostRecordingBatch
 fun GeneralSettingsContent(
     totalRecordCount: Int,
     lastSyncedAt: Long,
+    // ★ 追加: ベータ版設定用の引数
+    receiveBetaUpdates: Boolean,
+    onToggleBetaUpdates: (Boolean) -> Unit,
+    betaUpdateR: FocusRequester,
+    // ----------
     onForceSync: () -> Unit,
     onClearChannel: () -> Unit,
     onClearHistory: () -> Unit,
@@ -49,6 +54,24 @@ fun GeneralSettingsContent(
             fontWeight = FontWeight.Bold
         )
 
+        // ★ 追加: ベータ版アップデート設定用のセクション
+        SettingsSection("システム設定") {
+            SettingToggleItem(
+                title = "ベータ版のアップデートを受け取る",
+                description = "次期バージョンの新機能をいち早く試すことができます。動作が不安定になる可能性があります。",
+                icon = Icons.Default.SystemUpdate,
+                checked = receiveBetaUpdates,
+                onCheckedChange = { onToggleBetaUpdates(it) },
+                modifier = Modifier
+                    .focusRequester(betaUpdateR)
+                    .focusProperties {
+                        left = sidebarR
+                        up = FocusRequester.Cancel // 一番上の項目なので上はキャンセル
+                        down = dbInfoR // 下はDB情報へ
+                    }
+            )
+        }
+
         SettingsSection("データベース情報") {
             SettingItem(
                 title = "ローカル保存件数",
@@ -58,7 +81,8 @@ fun GeneralSettingsContent(
                     .focusRequester(dbInfoR)
                     .focusProperties {
                         left = sidebarR
-                        up = FocusRequester.Cancel
+                        up = betaUpdateR // ★ 修正: Cancel から betaUpdateR へ変更
+                        down = forceSyncR
                     },
                 onClick = { onClick(dbInfoR) }
             )
@@ -68,7 +92,11 @@ fun GeneralSettingsContent(
                 icon = Icons.Default.CloudSync,
                 modifier = Modifier
                     .focusRequester(forceSyncR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = dbInfoR
+                        down = clearChannelR
+                    },
                 onClick = { onClick(forceSyncR); onForceSync() }
             )
         }
@@ -80,7 +108,11 @@ fun GeneralSettingsContent(
                 Icons.Default.History,
                 modifier = Modifier
                     .focusRequester(clearChannelR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = forceSyncR
+                        down = clearHistoryR
+                    },
                 onClick = { onClick(clearChannelR); onClearChannel() })
             SettingItem(
                 AppStrings.SETTINGS_ITEM_CLEAR_WATCH_HISTORY,
@@ -88,7 +120,10 @@ fun GeneralSettingsContent(
                 Icons.Default.DeleteSweep,
                 modifier = Modifier
                     .focusRequester(clearHistoryR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = clearChannelR
+                    },
                 onClick = { onClick(clearHistoryR); onClearHistory() })
         }
     }
@@ -189,6 +224,7 @@ fun ConnectionSettingsContent(
                     .focusProperties {
                         left = sidebarR
                         up = FocusRequester.Cancel
+                        down = kPortR
                     },
                 onClick = {
                     onClick(kIpR); onEdit(
@@ -202,7 +238,11 @@ fun ConnectionSettingsContent(
                 Icons.Default.Numbers,
                 modifier = Modifier
                     .focusRequester(kPortR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = kIpR
+                        down = mIpR
+                    },
                 onClick = {
                     onClick(kPortR); onEdit(
                     AppStrings.SETTINGS_INPUT_KONOMITV_PORT,
@@ -218,7 +258,11 @@ fun ConnectionSettingsContent(
                 Icons.Default.Router,
                 modifier = Modifier
                     .focusRequester(mIpR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = kPortR
+                        down = mPortR
+                    },
                 onClick = {
                     onClick(mIpR); onEdit(
                     AppStrings.SETTINGS_INPUT_MIRAKURUN_ADDRESS,
@@ -231,7 +275,11 @@ fun ConnectionSettingsContent(
                 Icons.Default.Numbers,
                 modifier = Modifier
                     .focusRequester(mPortR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = mIpR
+                        down = prefSrcR
+                    },
                 onClick = {
                     onClick(mPortR); onEdit(
                     AppStrings.SETTINGS_INPUT_MIRAKURUN_PORT,
@@ -253,7 +301,10 @@ fun ConnectionSettingsContent(
                 Icons.Default.PriorityHigh,
                 modifier = Modifier
                     .focusRequester(prefSrcR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = mPortR
+                    },
                 onClick = { onClick(prefSrcR); onSelectSrc() })
         }
     }
@@ -299,6 +350,7 @@ fun PlaybackSettingsContent(
                     .focusProperties {
                         left = sidebarR
                         up = FocusRequester.Cancel
+                        down = videoR
                     },
                 onClick = { onClick(liveR); onL() })
             SettingItem(
@@ -307,7 +359,11 @@ fun PlaybackSettingsContent(
                 Icons.Default.VideoFile,
                 modifier = Modifier
                     .focusRequester(videoR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = liveR
+                        down = liveSubR
+                    },
                 onClick = { onClick(videoR); onV() })
         }
         SettingsSection(AppStrings.SETTINGS_SECTION_SUBTITLE_AUDIO) {
@@ -317,7 +373,11 @@ fun PlaybackSettingsContent(
                 Icons.Default.Subtitles,
                 modifier = Modifier
                     .focusRequester(liveSubR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = videoR
+                        down = videoSubR
+                    },
                 onClick = { onClick(liveSubR); onLiveSub() })
             SettingItem(
                 AppStrings.SETTINGS_ITEM_VIDEO_SUBTITLE_DEFAULT,
@@ -325,7 +385,11 @@ fun PlaybackSettingsContent(
                 Icons.Default.ClosedCaption,
                 modifier = Modifier
                     .focusRequester(videoSubR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = liveSubR
+                        down = audioR
+                    },
                 onClick = { onClick(videoSubR); onVideoSub() })
             SettingItem(
                 AppStrings.SETTINGS_ITEM_AUDIO_OUTPUT_MODE,
@@ -333,7 +397,11 @@ fun PlaybackSettingsContent(
                 Icons.Default.AudioFile,
                 modifier = Modifier
                     .focusRequester(audioR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = videoSubR
+                        down = layerR
+                    },
                 onClick = { onClick(audioR); onAudioMode() })
         }
         SettingsSection(AppStrings.SETTINGS_SECTION_COMMENT_LAYER) {
@@ -343,7 +411,10 @@ fun PlaybackSettingsContent(
                 Icons.Default.Layers,
                 modifier = Modifier
                     .focusRequester(layerR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = audioR
+                    },
                 onClick = { onClick(layerR); onLayer() })
         }
     }
@@ -389,6 +460,7 @@ fun HomeDisplaySettingsContent(
                     .focusProperties {
                         left = sidebarR
                         up = FocusRequester.Cancel
+                        down = colorR
                     },
                 onClick = { onClick(modeR); onMode() })
             val seasonLabel = when (themeSeason) {
@@ -400,7 +472,11 @@ fun HomeDisplaySettingsContent(
                 Icons.Default.ColorLens,
                 modifier = Modifier
                     .focusRequester(colorR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = modeR
+                        down = genreR
+                    },
                 onClick = { onClick(colorR); onColor() })
         }
         SettingsSection(AppStrings.SETTINGS_SECTION_HOME_PICKUP) {
@@ -410,7 +486,11 @@ fun HomeDisplaySettingsContent(
                 Icons.Default.AutoAwesome,
                 modifier = Modifier
                     .focusRequester(genreR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = colorR
+                        down = timeR
+                    },
                 onClick = { onClick(genreR); onG() })
             SettingItem(
                 AppStrings.SETTINGS_ITEM_PICKUP_TIME,
@@ -418,7 +498,11 @@ fun HomeDisplaySettingsContent(
                 Icons.Default.Schedule,
                 modifier = Modifier
                     .focusRequester(timeR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = genreR
+                        down = exPaidR
+                    },
                 onClick = { onClick(timeR); onTime() })
             SettingItem(
                 AppStrings.SETTINGS_ITEM_EXCLUDE_PAID,
@@ -426,7 +510,10 @@ fun HomeDisplaySettingsContent(
                 Icons.Default.Lock,
                 modifier = Modifier
                     .focusRequester(exPaidR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = timeR
+                    },
                 onClick = { onClick(exPaidR); onExPaid() })
         }
     }
@@ -461,6 +548,7 @@ fun DisplaySettingsContent(
                     .focusProperties {
                         left = sidebarR
                         up = FocusRequester.Cancel
+                        down = itemRs[1]
                     },
                 onClick = { onClick(itemRs[0]); onEditTab() })
 
@@ -470,7 +558,11 @@ fun DisplaySettingsContent(
                 Icons.Default.LiveTv,
                 modifier = Modifier
                     .focusRequester(itemRs[1])
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = itemRs[0]
+                        down = itemRs[2]
+                    },
                 onClick = { onClick(itemRs[1]); onEditStartupChannel() })
 
             SettingItem(
@@ -479,7 +571,11 @@ fun DisplaySettingsContent(
                 Icons.Default.GridView,
                 modifier = Modifier
                     .focusRequester(itemRs[2])
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = itemRs[1]
+                        down = itemRs[3]
+                    },
                 onClick = { onClick(itemRs[2]); onEditDefaultView() })
 
             SettingItem(
@@ -488,7 +584,10 @@ fun DisplaySettingsContent(
                 Icons.Default.Schedule,
                 modifier = Modifier
                     .focusRequester(itemRs[3])
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = itemRs[2]
+                    },
                 onClick = { onClick(itemRs[3]); onEditTimeFormat() })
         }
     }
@@ -528,6 +627,7 @@ fun CommentSettingsContent(
                     .focusProperties {
                         left = sidebarR
                         up = FocusRequester.Cancel
+                        down = spR
                     },
                 onClick = { onClick(defR); onT() })
             SettingItem(
@@ -536,7 +636,11 @@ fun CommentSettingsContent(
                 Icons.Default.Speed,
                 modifier = Modifier
                     .focusRequester(spR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = defR
+                        down = szR
+                    },
                 onClick = { onClick(spR); onEdit(AppStrings.SETTINGS_INPUT_COMMENT_SPEED, speed) })
             SettingItem(
                 AppStrings.SETTINGS_ITEM_COMMENT_SIZE,
@@ -544,7 +648,11 @@ fun CommentSettingsContent(
                 Icons.Default.TextFormat,
                 modifier = Modifier
                     .focusRequester(szR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = spR
+                        down = opR
+                    },
                 onClick = { onClick(szR); onEdit(AppStrings.SETTINGS_INPUT_COMMENT_SIZE, size) })
             SettingItem(
                 AppStrings.SETTINGS_ITEM_COMMENT_OPACITY,
@@ -552,7 +660,11 @@ fun CommentSettingsContent(
                 Icons.Default.Opacity,
                 modifier = Modifier
                     .focusRequester(opR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = szR
+                        down = mxR
+                    },
                 onClick = {
                     onClick(opR); onEdit(
                     AppStrings.SETTINGS_INPUT_COMMENT_OPACITY,
@@ -565,7 +677,10 @@ fun CommentSettingsContent(
                 Icons.Default.VerticalAlignTop,
                 modifier = Modifier
                     .focusRequester(mxR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = opR
+                    },
                 onClick = {
                     onClick(mxR); onEdit(
                     AppStrings.SETTINGS_INPUT_COMMENT_MAX_LINES,
@@ -608,6 +723,7 @@ fun LabSettingsContent(
                     .focusProperties {
                         left = sidebarR
                         up = FocusRequester.Cancel
+                        down = baseballR
                     },
                 onClick = { onClick(dualR); onToggleMirakurunDual() }
             )
@@ -621,7 +737,11 @@ fun LabSettingsContent(
                 icon = Icons.Default.SportsBaseball,
                 modifier = Modifier
                     .focusRequester(baseballR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = dualR
+                        down = apiKeyR
+                    },
                 onClick = { onClick(baseballR); onBaseball() }
             )
         }
@@ -634,7 +754,10 @@ fun LabSettingsContent(
                 icon = Icons.Default.AutoAwesome,
                 modifier = Modifier
                     .focusRequester(apiKeyR)
-                    .focusProperties { left = sidebarR },
+                    .focusProperties {
+                        left = sidebarR
+                        up = baseballR
+                    },
                 onClick = { onClick(apiKeyR); onEditApiKey() }
             )
         }

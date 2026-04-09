@@ -1001,3 +1001,66 @@ fun rememberQrBitmap(content: String, size: Int): androidx.compose.ui.graphics.I
         }
     }
 }
+
+// ★ 追加: トグル（ON/OFF）切り替え用の設定アイテムコンポーネント
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun SettingToggleItem(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = KomorebiTheme.colors
+    var isFocused by remember { mutableStateOf(false) }
+
+    Surface(
+        onClick = { onCheckedChange(!checked) },
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            focusedContainerColor = colors.textPrimary.copy(alpha = 0.1f)
+        ),
+        shape = ClickableSurfaceDefaults.shape(shape = RoundedCornerShape(8.dp)),
+        modifier = modifier
+            .fillMaxWidth()
+            .onFocusChanged { isFocused = it.isFocused }
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (isFocused) colors.accent else colors.textPrimary,
+                modifier = Modifier.size(32.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                if (description.isNotEmpty()) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            // ONの時は色のついたチェックボックス、OFFの時は空の四角を表示
+            Icon(
+                imageVector = if (checked) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                contentDescription = null,
+                tint = if (checked) colors.accent else colors.textSecondary,
+                modifier = Modifier.size(32.dp)
+            )
+        }
+    }
+}
