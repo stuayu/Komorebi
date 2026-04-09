@@ -1,6 +1,13 @@
 {
-  "versionCode": 9,
-  "versionName": "1.0.0-beta2",
-  "releaseNotes": "・細かいバグを修正\n",
-  "apkUrl": "https://github.com/BeerEgg2001/Komorebi/releases/download/1.0.0-beta2/Komorebi-1.0.0-beta2.apk"
+  "versionCode": 10,
+  "versionName": "1.0.0",
+  "releaseNotes": "・アプリ内PiPモード対応\n・アプリアップデータのbetaチャンネルへの対応\n・細かいバグを修正\n",
+  "apkUrl": "https://github.com/BeerEgg2001/Komorebi/releases/download/1.0.0/Komorebi-1.0.0.apk",
+
+  "beta": {
+    "versionCode": 8,
+    "versionName": "1.1.0-beta1",
+    "releaseNotes": "EPGStation連携のテスト用\n",
+    "apkUrl": "https://.../Komorebi-1.1.0-beta1.apk"
+  }
 }
