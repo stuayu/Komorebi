@@ -13,8 +13,8 @@ import javax.inject.Singleton
  * リクエストヘッダーに付与するインターセプター。
  *
  * トークンが未設定の場合は何もしない。
- * 認証情報の漏洩を防ぐため、設定された KonomiTV サーバーのホスト宛の
- * リクエストにのみヘッダーを付与する。
+ * 認証情報の漏洩を防ぐため、設定された KonomiTV / Mirakurun サーバーの
+ * ホスト宛のリクエストにのみヘッダーを付与する。
  */
 @Singleton
 class CloudflareAccessInterceptor @Inject constructor(
@@ -26,10 +26,13 @@ class CloudflareAccessInterceptor @Inject constructor(
         val headers = runBlocking { settingsRepository.getCfAccessHeaders() }
         if (headers.isEmpty()) return chain.proceed(request)
 
-        val baseHost = runBlocking {
-            settingsRepository.getBaseUrl().toHttpUrlOrNull()?.host
+        val protectedHosts = runBlocking {
+            listOfNotNull(
+                settingsRepository.getBaseUrl().toHttpUrlOrNull()?.host,
+                settingsRepository.getMirakurunBaseUrl()?.toHttpUrlOrNull()?.host
+            )
         }
-        if (baseHost == null || request.url.host != baseHost) {
+        if (request.url.host !in protectedHosts) {
             return chain.proceed(request)
         }
 

@@ -551,6 +551,8 @@ fun LivePlayerScreen(
                     "-x", "18/38/39", "-n", currentChannelItem.serviceId.toString(),
                     "-a", "13", "-b", "4", "-c", "5", "-u", "1", "-d", "13"
                 )
+                // ★ 追加: Mirakurun ストリームにも Cloudflare Access ヘッダーを付与
+                tsDataSourceFactory.requestHeaders = cfAccessHeaders
                 UrlBuilder.getMirakurunStreamUrl(
                     mirakurunIp ?: "", mirakurunPort ?: "",
                     currentChannelItem.networkId, currentChannelItem.serviceId
@@ -603,6 +605,8 @@ fun LivePlayerScreen(
                         "-x", "18/38/39", "-n", rightChannel.serviceId.toString(),
                         "-a", "13", "-b", "4", "-c", "5", "-u", "1", "-d", "13"
                     )
+                    // ★ 追加: Mirakurun ストリームにも Cloudflare Access ヘッダーを付与
+                    dualTsDataSourceFactory.requestHeaders = cfAccessHeaders
                     UrlBuilder.getMirakurunStreamUrl(
                         mirakurunIp ?: "", mirakurunPort ?: "",
                         rightChannel.networkId, rightChannel.serviceId

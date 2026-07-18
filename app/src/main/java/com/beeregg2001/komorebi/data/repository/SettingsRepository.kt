@@ -188,6 +188,18 @@ class SettingsRepository @Inject constructor(
         )
     }
 
+    // ★ 追加: Mirakurun のベースURLを取得 (未設定なら null)
+    suspend fun getMirakurunBaseUrl(): String? {
+        val prefs = context.dataStore.data.first()
+        var ip = prefs[MIRAKURUN_IP] ?: ""
+        if (ip.isBlank()) return null
+        val port = prefs[MIRAKURUN_PORT] ?: "40772"
+        if (!ip.startsWith("http://") && !ip.startsWith("https://")) {
+            ip = "http://$ip"
+        }
+        return "$ip:$port"
+    }
+
     suspend fun getStartupTabOnce(): String {
         val prefs = context.dataStore.data.first()
         return prefs[STARTUP_TAB] ?: "ホーム"

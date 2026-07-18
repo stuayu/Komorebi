@@ -630,7 +630,8 @@ fun VideoPlayerScreen(
                         onSceneSearchToggle(false); scope.launch {
                         delay(200); mainFocusRequester.safeRequestFocus(TAG)
                     }
-                    })
+                    },
+                    requestHeaders = cfAccessHeaders)
             }
 
             AnimatedVisibility(
@@ -651,7 +652,8 @@ fun VideoPlayerScreen(
                     {
                         isChapterListOpen = false
                         scope.launch { delay(200); mainFocusRequester.safeRequestFocus(TAG) }
-                    }
+                    },
+                    requestHeaders = cfAccessHeaders
                 )
             }
 

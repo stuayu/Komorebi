@@ -16,7 +16,8 @@ import java.io.IOException
 @UnstableApi
 class TsReadExDataSource(
     private val nativeLib: NativeLib,
-    private val tsArgs: Array<String>
+    private val tsArgs: Array<String>,
+    private val requestHeaders: Map<String, String> = emptyMap()
 ) : BaseDataSource(true) {
 
     private var handle: Long = 0
@@ -49,6 +50,8 @@ class TsReadExDataSource(
             connectTimeout = 8000
             readTimeout = 8000
             doInput = true
+            // ★ 追加: Cloudflare Access ヘッダーを付与
+            requestHeaders.forEach { (name, value) -> setRequestProperty(name, value) }
         }
 
         val responseCode = connection?.responseCode ?: -1
