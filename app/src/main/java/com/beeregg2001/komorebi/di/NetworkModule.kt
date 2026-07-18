@@ -3,6 +3,7 @@ package com.beeregg2001.komorebi.di
 import com.beeregg2001.komorebi.data.SettingsRepository
 import com.beeregg2001.komorebi.data.repository.KonomiTvApiService
 import com.beeregg2001.komorebi.data.api.KonomiApi
+import com.beeregg2001.komorebi.data.api.interceptor.CloudflareAccessInterceptor
 import com.beeregg2001.komorebi.data.api.interceptor.MockRecordInterceptor
 import com.google.gson.Gson
 import dagger.Module
@@ -29,7 +30,10 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(settingsRepository: SettingsRepository): OkHttpClient {
+    fun provideOkHttpClient(
+        settingsRepository: SettingsRepository,
+        cloudflareAccessInterceptor: CloudflareAccessInterceptor
+    ): OkHttpClient {
         val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
             override fun checkClientTrusted(
                 chain: Array<out X509Certificate>?,
@@ -77,6 +81,7 @@ object NetworkModule {
                     .build()
                 chain.proceed(newRequest)
             }
+            .addInterceptor(cloudflareAccessInterceptor)
             .build()
     }
 

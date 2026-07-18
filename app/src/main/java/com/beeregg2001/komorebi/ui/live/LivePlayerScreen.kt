@@ -36,6 +36,8 @@ import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.TimestampAdjuster
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -142,6 +144,13 @@ fun LivePlayerScreen(
 
     val allowMirakurunDual by settingsViewModel.labAllowMirakurunDual.collectAsState()
 
+    // ★ 追加: Cloudflare Zero Trust サービストークン (未設定なら空Map)
+    val cfAccessClientId by settingsViewModel.cfAccessClientId.collectAsState()
+    val cfAccessClientSecret by settingsViewModel.cfAccessClientSecret.collectAsState()
+    val cfAccessHeaders = remember(cfAccessClientId, cfAccessClientSecret) {
+        SettingsRepository.buildCfAccessHeaders(cfAccessClientId, cfAccessClientSecret)
+    }
+
     val commentSpeed = commentSpeedStr.toFloatOrNull() ?: 1.0f
     val commentFontSizeScale = commentFontSizeStr.toFloatOrNull() ?: 1.0f
     val commentOpacity = commentOpacityStr.toFloatOrNull() ?: 1.0f
@@ -242,7 +251,13 @@ fun LivePlayerScreen(
     }
 
     val exoPlayer =
-        remember(ps.currentStreamSource, ps.retryKey, ps.currentQuality, audioOutputMode) {
+        remember(
+            ps.currentStreamSource,
+            ps.retryKey,
+            ps.currentQuality,
+            audioOutputMode,
+            cfAccessHeaders
+        ) {
             val renderersFactory = object : DefaultRenderersFactory(context) {
                 override fun buildAudioSink(
                     ctx: Context,
@@ -281,6 +296,15 @@ fun LivePlayerScreen(
                             DefaultMediaSourceFactory(
                                 tsDataSourceFactory,
                                 extractorsFactory
+                            )
+                        )
+                    } else {
+                        // ★ 追加: KonomiTV ストリームに Cloudflare Access ヘッダーを付与
+                        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+                            .setDefaultRequestProperties(cfAccessHeaders)
+                        setMediaSourceFactory(
+                            DefaultMediaSourceFactory(
+                                DefaultDataSource.Factory(context, httpDataSourceFactory)
                             )
                         )
                     }
@@ -366,7 +390,8 @@ fun LivePlayerScreen(
         ps.currentStreamSource,
         ps.retryKey,
         ps.currentQuality,
-        audioOutputMode
+        audioOutputMode,
+        cfAccessHeaders
     ) {
         if (!ps.isDualDisplayMode) return@remember null
 
@@ -408,6 +433,15 @@ fun LivePlayerScreen(
                         DefaultMediaSourceFactory(
                             dualTsDataSourceFactory,
                             dualExtractorsFactory
+                        )
+                    )
+                } else {
+                    // ★ 追加: KonomiTV ストリームに Cloudflare Access ヘッダーを付与
+                    val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+                        .setDefaultRequestProperties(cfAccessHeaders)
+                    setMediaSourceFactory(
+                        DefaultMediaSourceFactory(
+                            DefaultDataSource.Factory(context, httpDataSourceFactory)
                         )
                     )
                 }
@@ -621,6 +655,7 @@ fun LivePlayerScreen(
         val request = Request.Builder()
             .url(eventUrl)
             .header("User-Agent", "Komorebi/1.0 (Dual)")
+            .apply { cfAccessHeaders.forEach { (name, value) -> header(name, value) } }
             .build()
 
         val listener = object : EventSourceListener() {
@@ -704,6 +739,7 @@ fun LivePlayerScreen(
         val request = Request.Builder()
             .url(eventUrl)
             .header("User-Agent", "Komorebi/1.0 (Main)")
+            .apply { cfAccessHeaders.forEach { (name, value) -> header(name, value) } }
             .build()
 
         val listener = object : EventSourceListener() {

@@ -42,6 +42,7 @@ import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.extractor.metadata.id3.PrivFrame
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.beeregg2001.komorebi.common.UrlBuilder
+import com.beeregg2001.komorebi.data.SettingsRepository
 import com.beeregg2001.komorebi.data.model.RecordedProgram
 import com.beeregg2001.komorebi.viewmodel.RecordViewModel
 import com.beeregg2001.komorebi.viewmodel.SettingsViewModel
@@ -119,6 +120,13 @@ fun VideoPlayerScreen(
     val subtitleCommentLayer by settingsViewModel.subtitleCommentLayer.collectAsState()
     val videoSubtitleDefaultStr by settingsViewModel.videoSubtitleDefault.collectAsState()
 
+    // ★ 追加: Cloudflare Zero Trust サービストークン (未設定なら空Map)
+    val cfAccessClientId by settingsViewModel.cfAccessClientId.collectAsState()
+    val cfAccessClientSecret by settingsViewModel.cfAccessClientSecret.collectAsState()
+    val cfAccessHeaders = remember(cfAccessClientId, cfAccessClientSecret) {
+        SettingsRepository.buildCfAccessHeaders(cfAccessClientId, cfAccessClientSecret)
+    }
+
     val commentSpeed = commentSpeedStr.toFloatOrNull() ?: 1.0f
     val commentFontSizeScale = commentFontSizeStr.toFloatOrNull() ?: 1.0f
     val commentOpacity = commentOpacityStr.toFloatOrNull() ?: 1.0f
@@ -160,7 +168,7 @@ fun VideoPlayerScreen(
         allComments.addAll(recordViewModel.getArchivedComments(program.recordedVideo.id))
     }
 
-    val exoPlayer = remember(vs.currentQuality) {
+    val exoPlayer = remember(vs.currentQuality, cfAccessHeaders) {
         val renderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(
                 ctx: Context,
@@ -181,6 +189,8 @@ fun VideoPlayerScreen(
             setAllowCrossProtocolRedirects(true)
             setConnectTimeoutMs(90000)
             setReadTimeoutMs(90000)
+            // ★ 追加: Cloudflare Access ヘッダーを付与
+            setDefaultRequestProperties(cfAccessHeaders)
         }
 
         val loadControl = DefaultLoadControl.Builder()

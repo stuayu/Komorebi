@@ -65,6 +65,12 @@ class SettingsViewModel @Inject constructor(
     val konomiPort: StateFlow<String> = settingsRepository.konomiPort
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "7000")
 
+    // ★ 追加: Cloudflare Zero Trust サービストークン
+    val cfAccessClientId: StateFlow<String> = settingsRepository.cfAccessClientId
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val cfAccessClientSecret: StateFlow<String> = settingsRepository.cfAccessClientSecret
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
     val commentSpeed: StateFlow<String> = settingsRepository.commentSpeed
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "1.0")
     val commentFontSize: StateFlow<String> = settingsRepository.commentFontSize

@@ -196,6 +196,8 @@ fun ConnectionSettingsContent(
     mIp: String,
     mPort: String,
     prefSrc: String,
+    cfClientId: String,
+    cfClientSecret: String,
     onEdit: (String, String) -> Unit,
     onSelectSrc: () -> Unit,
     kIpR: FocusRequester,
@@ -203,6 +205,8 @@ fun ConnectionSettingsContent(
     mIpR: FocusRequester,
     mPortR: FocusRequester,
     prefSrcR: FocusRequester,
+    cfIdR: FocusRequester,
+    cfSecretR: FocusRequester,
     sidebarR: FocusRequester,
     onClick: (FocusRequester) -> Unit
 ) {
@@ -304,8 +308,45 @@ fun ConnectionSettingsContent(
                     .focusProperties {
                         left = sidebarR
                         up = mPortR
+                        down = cfIdR
                     },
                 onClick = { onClick(prefSrcR); onSelectSrc() })
+        }
+
+        SettingsSection(AppStrings.SETTINGS_SECTION_CLOUDFLARE) {
+            SettingItem(
+                AppStrings.SETTINGS_ITEM_CF_CLIENT_ID,
+                cfClientId.ifEmpty { AppStrings.SETTINGS_VALUE_UNSET },
+                Icons.Default.Cloud,
+                modifier = Modifier
+                    .focusRequester(cfIdR)
+                    .focusProperties {
+                        left = sidebarR
+                        up = prefSrcR
+                        down = cfSecretR
+                    },
+                onClick = {
+                    onClick(cfIdR); onEdit(
+                    AppStrings.SETTINGS_INPUT_CF_CLIENT_ID,
+                    cfClientId
+                )
+                })
+            SettingItem(
+                AppStrings.SETTINGS_ITEM_CF_CLIENT_SECRET,
+                if (cfClientSecret.isEmpty()) AppStrings.SETTINGS_VALUE_UNSET else AppStrings.SETTINGS_VALUE_CF_SET,
+                Icons.Default.Key,
+                modifier = Modifier
+                    .focusRequester(cfSecretR)
+                    .focusProperties {
+                        left = sidebarR
+                        up = cfIdR
+                    },
+                onClick = {
+                    onClick(cfSecretR); onEdit(
+                    AppStrings.SETTINGS_INPUT_CF_CLIENT_SECRET,
+                    cfClientSecret
+                )
+                })
         }
     }
 }

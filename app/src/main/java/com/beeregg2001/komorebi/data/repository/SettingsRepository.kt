@@ -65,6 +65,22 @@ class SettingsRepository @Inject constructor(
 
         // ★ 追加: ベータ版アップデート受信設定のキー
         val RECEIVE_BETA_UPDATES = booleanPreferencesKey("receive_beta_updates")
+
+        // ★ 追加: Cloudflare Zero Trust (Cloudflare Access) サービストークン
+        val CF_ACCESS_CLIENT_ID = stringPreferencesKey("cf_access_client_id")
+        val CF_ACCESS_CLIENT_SECRET = stringPreferencesKey("cf_access_client_secret")
+
+        const val CF_ACCESS_CLIENT_ID_HEADER = "CF-Access-Client-Id"
+        const val CF_ACCESS_CLIENT_SECRET_HEADER = "CF-Access-Client-Secret"
+
+        // ★ 追加: トークン値からヘッダーMapを組み立てる (未設定なら空Map)
+        fun buildCfAccessHeaders(clientId: String, clientSecret: String): Map<String, String> {
+            if (clientId.isBlank() || clientSecret.isBlank()) return emptyMap()
+            return mapOf(
+                CF_ACCESS_CLIENT_ID_HEADER to clientId,
+                CF_ACCESS_CLIENT_SECRET_HEADER to clientSecret
+            )
+        }
     }
 
     val konomiIp: Flow<String> = context.dataStore.data.map { it[KONOMI_IP] ?: "" }
@@ -130,6 +146,12 @@ class SettingsRepository @Inject constructor(
     // ★ 追加: ベータ版を受け取るかどうかのFlow
     val receiveBetaUpdates: Flow<Boolean> = context.dataStore.data.map { it[RECEIVE_BETA_UPDATES] ?: false }
 
+    // ★ 追加: Cloudflare Zero Trust サービストークンのFlow
+    val cfAccessClientId: Flow<String> =
+        context.dataStore.data.map { it[CF_ACCESS_CLIENT_ID] ?: "" }
+    val cfAccessClientSecret: Flow<String> =
+        context.dataStore.data.map { it[CF_ACCESS_CLIENT_SECRET] ?: "" }
+
     val isInitialized: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs.contains(KONOMI_IP) || prefs.contains(MIRAKURUN_IP)
     }
@@ -155,6 +177,15 @@ class SettingsRepository @Inject constructor(
             ip = "http://$ip"
         }
         return "$ip:$port"
+    }
+
+    // ★ 追加: Cloudflare Access サービストークンをヘッダーMapとして取得 (未設定なら空Map)
+    suspend fun getCfAccessHeaders(): Map<String, String> {
+        val prefs = context.dataStore.data.first()
+        return buildCfAccessHeaders(
+            prefs[CF_ACCESS_CLIENT_ID] ?: "",
+            prefs[CF_ACCESS_CLIENT_SECRET] ?: ""
+        )
     }
 
     suspend fun getStartupTabOnce(): String {

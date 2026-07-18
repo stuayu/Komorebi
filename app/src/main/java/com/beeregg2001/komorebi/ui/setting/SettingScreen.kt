@@ -97,7 +97,9 @@ fun SettingsScreen(
                 FocusRequester(),
                 FocusRequester(),
                 FocusRequester(),
-                FocusRequester()
+                FocusRequester(),
+                FocusRequester(),
+                FocusRequester() // ★ 追加: Cloudflare Zero Trust 用に 5個 → 7個 に増強
             ), // 1: Connection
             listOf(
                 FocusRequester(),
@@ -305,6 +307,8 @@ fun SettingsScreen(
                         mIp = prefs.mirakurunIp,
                         mPort = prefs.mirakurunPort,
                         prefSrc = prefs.preferredSource,
+                        cfClientId = prefs.cfAccessClientId,
+                        cfClientSecret = prefs.cfAccessClientSecret,
                         onEdit = { t, v ->
                             uiState.activeDialog = SettingDialogState.Input(
                                 t,
@@ -316,8 +320,13 @@ fun SettingsScreen(
                                     it
                                 ) else scope.launch {
                                     repository.saveString(
-                                        if (t == AppStrings.SETTINGS_INPUT_MIRAKURUN_ADDRESS) SettingsRepository.MIRAKURUN_IP else SettingsRepository.MIRAKURUN_PORT,
-                                        it
+                                        when (t) {
+                                            AppStrings.SETTINGS_INPUT_MIRAKURUN_ADDRESS -> SettingsRepository.MIRAKURUN_IP
+                                            AppStrings.SETTINGS_INPUT_MIRAKURUN_PORT -> SettingsRepository.MIRAKURUN_PORT
+                                            AppStrings.SETTINGS_INPUT_CF_CLIENT_ID -> SettingsRepository.CF_ACCESS_CLIENT_ID
+                                            else -> SettingsRepository.CF_ACCESS_CLIENT_SECRET
+                                        },
+                                        it.trim()
                                     )
                                 }
                             }
@@ -344,6 +353,8 @@ fun SettingsScreen(
                         mIpR = itemFocusRequesters[1][2],
                         mPortR = itemFocusRequesters[1][3],
                         prefSrcR = itemFocusRequesters[1][4],
+                        cfIdR = itemFocusRequesters[1][5],
+                        cfSecretR = itemFocusRequesters[1][6],
                         sidebarR = categoryFocusRequesters[1],
                         onClick = {
                             uiState.restoreFocusRequester = it; uiState.restoreCategoryIndex = 1
