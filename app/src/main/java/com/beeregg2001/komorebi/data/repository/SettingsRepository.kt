@@ -74,11 +74,15 @@ class SettingsRepository @Inject constructor(
         const val CF_ACCESS_CLIENT_SECRET_HEADER = "CF-Access-Client-Secret"
 
         // ★ 追加: トークン値からヘッダーMapを組み立てる (未設定なら空Map)
+        // 保存済みの値に改行・空白が混入していても(過去の不具合や手動編集等で)
+        // OkHttp の header() が不正な文字で例外を投げないよう、ここで必ず除去する
         fun buildCfAccessHeaders(clientId: String, clientSecret: String): Map<String, String> {
-            if (clientId.isBlank() || clientSecret.isBlank()) return emptyMap()
+            val sanitizedId = clientId.replace(Regex("\\s+"), "")
+            val sanitizedSecret = clientSecret.replace(Regex("\\s+"), "")
+            if (sanitizedId.isBlank() || sanitizedSecret.isBlank()) return emptyMap()
             return mapOf(
-                CF_ACCESS_CLIENT_ID_HEADER to clientId,
-                CF_ACCESS_CLIENT_SECRET_HEADER to clientSecret
+                CF_ACCESS_CLIENT_ID_HEADER to sanitizedId,
+                CF_ACCESS_CLIENT_SECRET_HEADER to sanitizedSecret
             )
         }
     }

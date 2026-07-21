@@ -1,5 +1,6 @@
 package com.beeregg2001.komorebi.data.api.interceptor
 
+import android.util.Log
 import com.beeregg2001.komorebi.data.SettingsRepository
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -36,9 +37,22 @@ class CloudflareAccessInterceptor @Inject constructor(
             return chain.proceed(request)
         }
 
+        // ★ 診断用: トークン本体は出さず、長さと前後数文字だけをログに出す
+        headers[SettingsRepository.CF_ACCESS_CLIENT_ID_HEADER]?.let {
+            Log.d("CloudflareAccessInterceptor", "Client-Id len=${it.length} value=${mask(it)}")
+        }
+        headers[SettingsRepository.CF_ACCESS_CLIENT_SECRET_HEADER]?.let {
+            Log.d("CloudflareAccessInterceptor", "Client-Secret len=${it.length} value=${mask(it)}")
+        }
+
         val newRequest = request.newBuilder().apply {
             headers.forEach { (name, value) -> header(name, value) }
         }.build()
         return chain.proceed(newRequest)
+    }
+
+    private fun mask(value: String): String {
+        if (value.length <= 8) return "*".repeat(value.length)
+        return "${value.take(4)}...${value.takeLast(4)}"
     }
 }

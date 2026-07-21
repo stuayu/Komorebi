@@ -221,6 +221,10 @@ object AppStrings {
     const val SETTINGS_INPUT_CF_CLIENT_ID = "Cloudflare Access Client ID"
     const val SETTINGS_INPUT_CF_CLIENT_SECRET = "Cloudflare Access Client Secret"
     const val SETTINGS_VALUE_CF_SET = "設定済み"
+    const val SETTINGS_PLACEHOLDER_CF_CLIENT_ID =
+        "例: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.access"
+    const val SETTINGS_PLACEHOLDER_CF_CLIENT_SECRET =
+        "例: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
     // 再生設定
     const val SETTINGS_SECTION_QUALITY = "画質設定"

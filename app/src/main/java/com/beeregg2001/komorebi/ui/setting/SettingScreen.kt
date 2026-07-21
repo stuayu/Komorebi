@@ -311,8 +311,14 @@ fun SettingsScreen(
                         cfClientSecret = prefs.cfAccessClientSecret,
                         onEdit = { t, v ->
                             uiState.activeDialog = SettingDialogState.Input(
-                                t,
-                                v
+                                title = t,
+                                initialValue = v,
+                                isLongToken = t == AppStrings.SETTINGS_INPUT_CF_CLIENT_ID || t == AppStrings.SETTINGS_INPUT_CF_CLIENT_SECRET,
+                                placeholder = when (t) {
+                                    AppStrings.SETTINGS_INPUT_CF_CLIENT_ID -> AppStrings.SETTINGS_PLACEHOLDER_CF_CLIENT_ID
+                                    AppStrings.SETTINGS_INPUT_CF_CLIENT_SECRET -> AppStrings.SETTINGS_PLACEHOLDER_CF_CLIENT_SECRET
+                                    else -> null
+                                }
                             ) {
                                 if (t == AppStrings.SETTINGS_INPUT_KONOMITV_ADDRESS) viewModel.updateKonomiIp(
                                     it
@@ -326,7 +332,12 @@ fun SettingsScreen(
                                             AppStrings.SETTINGS_INPUT_CF_CLIENT_ID -> SettingsRepository.CF_ACCESS_CLIENT_ID
                                             else -> SettingsRepository.CF_ACCESS_CLIENT_SECRET
                                         },
-                                        it.trim()
+                                        // CF Access のトークンには空白・改行は含まれ得ないため、
+                                        // TV の画面キーボードが誤って挿入した改行等も除去する
+                                        if (t == AppStrings.SETTINGS_INPUT_CF_CLIENT_ID || t == AppStrings.SETTINGS_INPUT_CF_CLIENT_SECRET)
+                                            it.replace(Regex("\\s+"), "")
+                                        else
+                                            it.trim()
                                     )
                                 }
                             }
@@ -844,6 +855,8 @@ fun SettingsScreen(
         is SettingDialogState.Input -> InputDialog(
             title = state.title,
             initialValue = state.initialValue,
+            isLongToken = state.isLongToken,
+            placeholder = state.placeholder,
             onDismiss = { closeDialog() },
             onConfirm = { state.onConfirm(it); closeDialog() })
 

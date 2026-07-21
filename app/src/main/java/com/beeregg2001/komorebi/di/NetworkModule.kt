@@ -56,6 +56,8 @@ object NetworkModule {
 
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
+            // Cloudflare Access のシークレットは logcat に平文で残さない
+            redactHeader(SettingsRepository.CF_ACCESS_CLIENT_SECRET_HEADER)
         }
 
         return OkHttpClient.Builder()
@@ -82,6 +84,9 @@ object NetworkModule {
                 chain.proceed(newRequest)
             }
             .addInterceptor(cloudflareAccessInterceptor)
+            // 最後に追加し、実際に送信されるヘッダーとレスポンス本文をログ出力する
+            // (CF Access のブロック/認証ページがHTMLで返ってきていないか確認するため)
+            .addInterceptor(logging)
             .build()
     }
 

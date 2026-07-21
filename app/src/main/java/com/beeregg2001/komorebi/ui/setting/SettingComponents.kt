@@ -57,8 +57,13 @@ import androidx.compose.material3.CircularProgressIndicator
 
 sealed class SettingDialogState {
     object None : SettingDialogState()
-    data class Input(val title: String, val initialValue: String, val onConfirm: (String) -> Unit) :
-        SettingDialogState()
+    data class Input(
+        val title: String,
+        val initialValue: String,
+        val isLongToken: Boolean = false,
+        val placeholder: String? = null,
+        val onConfirm: (String) -> Unit
+    ) : SettingDialogState()
 
     data class BatchInput(val onConfirm: (String, String) -> Unit) : SettingDialogState()
 
